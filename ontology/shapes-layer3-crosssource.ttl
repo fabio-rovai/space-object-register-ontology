@@ -44,3 +44,13 @@ space:UnnumberedObjectShape a sh:NodeShape ;
   sh:sparql [
     sh:message "Object tracked with no identifier assigned in the reference scheme." ;
     sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#UnnumberedObject> }""" ] .
+
+space:UnattributedObjectShape a sh:NodeShape ;
+  sh:targetClass space:UnattributedObject ; sh:severity sh:Warning ;
+  sh:sparql [ sh:message "On-orbit object with undetermined owner." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#UnattributedObject> }""" ] .
+
+space:UncharacterisedObjectShape a sh:NodeShape ;
+  sh:targetClass space:UncharacterisedObject ; sh:severity sh:Warning ;
+  sh:sparql [ sh:message "On-orbit object with no published radar cross section." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#UncharacterisedObject> }""" ] .

@@ -6,7 +6,8 @@ files, and via SPARQL over the emitted graph. Any disagreement exits non-zero.
 import json, sys, pathlib, collections
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import rdflib
-from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+from reconcile import (load_celestrak, load_gcat, DESTROYED, INORBIT,
+                       LEFT_EARTH, ERROR, LOST, norm_status)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 NS = "https://gov.tesseract.academy/def/space#"
@@ -16,21 +17,30 @@ def python_side():
     sat, _, nona = load_gcat("gcat_satcat.tsv")
     aux, _, _ = load_gcat("gcat_auxcat.tsv")
     fto, _, _ = load_gcat("gcat_ftocat.tsv")
-    allg = set(sat) | set(aux) | set(fto)
-    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    k100, _, _ = load_gcat("gcat_satcat100k.tsv")
+    allg = set(sat) | set(aux) | set(fto) | set(k100)
+    st = {n: {norm_status(p.get("Status", "")) for p in v} for n, v in sat.items()}
     ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    onorb = {n for n in ct if not ct[n]["DECAY_DATE"].strip()}
     phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    claims = {n for n in sat if n in ct
+              and (st[n] & (DESTROYED | INORBIT | LEFT_EARTH)) and not (st[n] & ERROR)}
+    gone = {n for n in claims if st[n] & DESTROYED}
+    inorb = {n for n in claims if (st[n] & INORBIT)
+             and not (st[n] & DESTROYED) and not (st[n] & LEFT_EARTH)}
     return {
         "PhantomEntry": len(phantom),
         "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
-        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
-        "DispositionDisagreement": len({
-            n for n in sat if n in ct
-            and (bool(st[n] & GONE) != (n in ctdec))
-            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct
+                                        and n not in ctdec
+                                        and not ct[n]["DATA_STATUS_CODE"].strip()}),
+        "DispositionDisagreement": len((gone - ctdec) | (inorb & ctdec)),
         "CoverageGap": len(set(ct) - allg),
         "UnnumberedObject": len(nona),
-        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+        "UnattributedObject": len({n for n in onorb if ct[n]["OWNER"].strip() == "TBD"}),
+        "UncharacterisedObject": len({n for n in onorb if not ct[n]["RCS"].strip()}),
+        "IdentifierCollision": len({n for n in sat
+                                    if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
     }
 
 def sparql_side():
@@ -44,7 +54,8 @@ def sparql_side():
     print(f"  graph parsed: {len(g):,} triples", flush=True)
     out = {}
     for cls in ["PhantomEntry", "PhantomEntryOnOrbit", "UndisclosedTrackingLoss",
-                "DispositionDisagreement", "CoverageGap", "UnnumberedObject"]:
+                "DispositionDisagreement", "CoverageGap", "UnnumberedObject",
+                "UnattributedObject", "UncharacterisedObject"]:
         q = f"SELECT (COUNT(DISTINCT ?n) AS ?c) WHERE {{ ?n a <{NS}{cls}> }}"
         out[cls] = int(list(g.query(q))[0][0])
     q = (f"SELECT (COUNT(DISTINCT ?n) AS ?c) WHERE {{ ?n a <{NS}IdentifierCollision> ; "

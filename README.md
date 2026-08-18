@@ -13,7 +13,9 @@ holds across every pair of catalogues we have examined.
 ## What it found
 
 On 18 August 2026, comparing 70,292 CelesTrak objects against 69,391 numbered
-GCAT objects:
+GCAT objects, plus GCAT's `auxcat`, `ftocat` and `satcat100k`:
+
+**Things one catalogue knows and the other does not say**
 
 - **22 entries that GCAT states are not real objects** are still carried by
   CelesTrak. GCAT's own reasons include "Radar error", "Cataloging error" and
@@ -21,14 +23,40 @@ GCAT objects:
 - **One of those is carried as an on-orbit object.** NORAD 11006 has no decay
   date in CelesTrak, so an entry that GCAT says corresponds to no physical object
   counts as a tracked object still in orbit.
-- **1,104 objects GCAT records as no longer tracked** are presented by CelesTrak
-  as ordinary on-orbit objects, with nothing marking the loss of tracking.
-- **932 objects** on which the two catalogues disagree about whether the object
-  is still in orbit, after separating reentry from departure from Earth orbit.
-- **900 objects** in CelesTrak that appear in none of the three GCAT catalogues.
-- **605 objects GCAT tracks that have no NORAD number at all.**
-- **Three NORAD numbers asserted for two different objects inside GCAT**, which
-  are candidate defects in GCAT and are reported as such.
+- **1,094 objects GCAT records as no longer tracked** carry no data status code
+  in CelesTrak. This is not a missing field. CelesTrak maintains that field and
+  uses it on 1,292 other objects, 1,041 as "No Elements Available" and 251 as
+  "No Initial Elements". Ten of the GCAT-lost objects are flagged. The other
+  1,094 are presented as ordinary on-orbit objects.
+- **261 objects on which the two catalogues genuinely disagree** about whether
+  the object still exists in orbit. 216 are recorded by GCAT as destroyed or
+  returned while CelesTrak publishes no decay date, of which 154 are reentries,
+  30 explosions, 14 deorbits and 14 collisions, spread across every decade from
+  the 1960s to the 2020s. The remaining 45 run the other way.
+- **622 objects** appear in CelesTrak and in none of GCAT's four catalogues.
+- **605 objects GCAT tracks have no NORAD number at all.** 334 of them are still
+  in orbit, 538 launched since 2020, and 298 are Chinese.
+- **Three NORAD numbers are asserted for two different objects inside GCAT**,
+  which are candidate defects in GCAT and are reported as such.
+
+**Things neither catalogue can tell you**
+
+- **20,198 of 34,814 on-orbit objects, 58.0 percent, have no published radar
+  cross section**, so no size or mass estimate can be derived from the public
+  record. A further 618 have no orbital period at all.
+- **180 on-orbit objects have an owner recorded as "TBD"** and 53 have an object
+  type of "UNK". These are open identifications, not clerical gaps.
+- **Attribution is not interoperable between the two catalogues.** Only 42.2
+  percent of shared objects carry an identical owner string, and almost all of
+  the difference is vocabulary rather than disagreement: CIS against SU and RU,
+  PRC against CN, FR against F. Neither register publishes a crosswalk to the
+  other. The substantive part is that **CelesTrak's "CIS" collapses the Soviet
+  Union and the Russian Federation into a single code**, where GCAT separates
+  16,142 Soviet objects from 9,016 Russian ones. That distinction cannot be
+  recovered from CelesTrak at all.
+- **157 objects are attributed to the United States by CelesTrak and to New
+  Zealand by GCAT**, which is the launch state against operator nationality
+  question that determines liability under the Registration Convention.
 
 And one finding in the other direction, which matters just as much:
 
@@ -36,7 +64,8 @@ And one finding in the other direction, which matters just as much:
   duplicates and no collisions. We expected to find malformation and there is
   none.
 
-Full method, decomposition and caveats are in [BUILD_REPORT.md](BUILD_REPORT.md).
+Full method, decomposition, corrections and caveats are in
+[BUILD_REPORT.md](BUILD_REPORT.md).
 
 ## Why the phantom entries are the interesting part
 

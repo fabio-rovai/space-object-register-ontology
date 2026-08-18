@@ -197,3 +197,52 @@ pass.
 parses in 3.1 seconds and contains every node the findings depend on. That is a
 convenience for fast iteration. It is not what the published numbers rest on:
 those come from the full graph.
+
+## Corrections to the first version of this report
+
+Two numbers published in the first version of this report were wrong. Both were
+found by going back over the source field documentation rather than by any
+failure of the verification, and both are corrected above. The originals and
+their causes are recorded here rather than quietly replaced.
+
+**Disposition disagreement was published as 932. It is 261.** The error was a
+wrong classification of GCAT status codes. The first version treated only the
+reentry and landing codes as meaning the object was gone, and everything else as
+meaning it was still in orbit. That was wrong twice over. `E` (exploded) and `C`
+(collided) destroy the object and were being counted as still in orbit. More
+seriously, codes such as `DK` (docked), `ATT` (attached), `TFR` (transfer) and
+`GRP` (grappled) end a phase because the object joined another object, so GCAT is
+making no claim at all about current disposition, and 998 such objects were being
+counted as disagreements. Of the 769 residue the first report could not explain,
+every one turned out to have a CelesTrak orbit type of impact or landing, and the
+GCAT status was almost always a docking or attachment event. Gemini 8 is the
+clearest case: GCAT ends the phase at docking with the Agena, CelesTrak records
+the landing, and the two records are consistent.
+
+**Coverage gaps were published as 900. They are 622.** The first version checked
+`auxcat` and `ftocat` and stated that checking mattered. It did not check
+`satcat100k`, which was listed on the same index page, and which contains 354
+objects in the 100,000 range. Adding it recovers 280 of the 900.
+
+**The lesson worth recording is about the verification, not the arithmetic.** The
+dual-computation gate passed on the wrong number. It compared a Python path and a
+SPARQL path that shared the same incorrect status classification, so it confirmed
+that the two paths agreed rather than that the semantics were right. Agreement
+between two implementations of the same misunderstanding is not verification. The
+check that actually caught it was rereading the source's own field documentation
+and asking what each unexplained residue consisted of, which is a different kind
+of work and is now done for every number above.
+
+A third, smaller correction: undisclosed tracking loss was published as 1,104 and
+is now 1,094, because ten of those objects do carry a CelesTrak data status code
+of "No Elements Available" and are therefore disclosed.
+
+## What was added in the deeper pass
+
+The first pass compared identity and disposition. It did not touch attribution,
+characterisation data, or the fields CelesTrak publishes about its own
+uncertainty. Those produced the radar cross section coverage figure, the
+undetermined owner and unknown type counts, the Soviet and Russian attribution
+collapse, and the United States against New Zealand launch state difference. Two
+defect classes were added to the ontology to carry them, `space:UnattributedObject`
+and `space:UncharacterisedObject`, each with its own SHACL shape.

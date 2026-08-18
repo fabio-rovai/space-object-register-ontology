@@ -6,7 +6,8 @@ is parse-verified afterwards.
 """
 import csv, re, json, collections, pathlib, datetime, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+from reconcile import (load_celestrak, load_gcat, DESTROYED, TRANSITION,
+                       INORBIT, LEFT_EARTH, ERROR, LOST, norm_status)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HARVEST = "2026-08-18"
@@ -22,7 +23,8 @@ def main():
     sat, _, sat_nona = load_gcat("gcat_satcat.tsv")
     aux, _, _ = load_gcat("gcat_auxcat.tsv")
     fto, _, _ = load_gcat("gcat_ftocat.tsv")
-    allg = set(sat) | set(aux) | set(fto)
+    k100, _, _ = load_gcat("gcat_satcat100k.tsv")
+    allg = set(sat) | set(aux) | set(fto) | set(k100)
 
     cos_card = collections.Counter(ct[n]["OBJECT_ID"].strip() for n in ct)
     out = []
@@ -69,7 +71,7 @@ def main():
     for n, phases in sat.items():
         o = f"obj:{n}"
         e = f"{o}-gc"
-        sts = {p.get("Status", "").strip() for p in phases}
+        sts = {norm_status(p.get("Status", "")) for p in phases}
         nm = phases[0].get("Name", "")
         w(f"{e} a space:CatalogueEntry ; space:aboutObject {o} ; rdfs:label \"{esc(nm)}\" .")
         counts["entries"] += 1
@@ -89,21 +91,26 @@ def main():
             w(f"a1:gc-track-{n}-{HARVEST} a space:TrackingAssertion ; space:assertedBy space:GcatSatcat ; "
               f"space:assertedOn {D} ; space:aboutEntry {e} ; space:currentlyTracked false .")
             counts["track"] += 1
-            if n in ct and not ct[n]["DECAY_DATE"].strip():
+            if (n in ct and not ct[n]["DECAY_DATE"].strip()
+                    and not ct[n]["DATA_STATUS_CODE"].strip()):
                 w(f"{o} space:exhibitsDefect {o}-lost . {o}-lost a space:UndisclosedTrackingLoss .")
                 counts["undisclosed_loss"] += 1
-        gone = bool(sts & GONE)
+        gone = bool(sts & DESTROYED)
         left = bool(sts & LEFT_EARTH) and not gone
-        disp = "scheme:Reentered" if gone else ("scheme:LeftEarthOrbit" if left else "scheme:OnOrbit")
+        inorb = bool(sts & INORBIT) and not gone and not left
+        claims = bool(sts & (DESTROYED | INORBIT | LEFT_EARTH)) and not (sts & ERROR)
+        disp = ("scheme:Reentered" if gone else "scheme:LeftEarthOrbit" if left
+                else "scheme:OnOrbit" if inorb else "scheme:PhaseTransition")
         dd = phases[-1].get("DDate", "").strip()
         w(f"a1:gc-disp-{n}-{HARVEST} a space:DispositionAssertion ; space:assertedBy space:GcatSatcat ; "
           f"space:assertedOn {D} ; space:aboutEntry {e} ; space:disposition {disp}"
           + (f' ; space:dispositionDate "{esc(dd)}"' if dd and dd != "-" else "") + " .")
         counts["disp"] += 1
         # cross-source disposition disagreement
-        if n in ct:
+        if n in ct and claims:
             ctgone = bool(ct[n]["DECAY_DATE"].strip())
-            if ctgone != gone and not (ctgone and left):
+            disagree = (gone and not ctgone) or (inorb and ctgone)
+            if disagree:
                 w(f"{o} space:exhibitsDefect {o}-dispdis . {o}-dispdis a space:DispositionDisagreement ; "
                   f'space:disagreementField "disposition" ; '
                   f"space:disagreementBetween space:CelestrakSatcat , space:GcatSatcat .")
@@ -113,6 +120,17 @@ def main():
             w(f"{o} space:exhibitsDefect {o}-dup . {o}-dup a space:IdentifierCollision ; "
               f"space:disagreementBetween space:GcatSatcat .")
             counts["gcat_dup"] += 1
+
+    # attribution and characterisation gaps inside CelesTrak itself
+    for n, r in ct.items():
+        if r["DECAY_DATE"].strip():
+            continue
+        if r["OWNER"].strip() == "TBD":
+            w(f"obj:{n} space:exhibitsDefect obj:{n}-unattr . obj:{n}-unattr a space:UnattributedObject .")
+            counts["unattributed"] += 1
+        if not r["RCS"].strip():
+            w(f"obj:{n} space:exhibitsDefect obj:{n}-unchar . obj:{n}-unchar a space:UncharacterisedObject .")
+            counts["uncharacterised"] += 1
 
     # coverage gaps, checked against every GCAT catalogue
     for n in set(ct) - allg:
@@ -137,6 +155,7 @@ def emit_defect_subgraph():
     root = pathlib.Path(__file__).resolve().parent.parent
     src = (root / "reports" / "graph.ttl").read_text().splitlines()
     keep = ("PhantomEntry", "UndisclosedTrackingLoss", "DispositionDisagreement",
-            "CoverageGap", "UnnumberedObject", "IdentifierCollision")
+            "CoverageGap", "UnnumberedObject", "IdentifierCollision",
+            "UnattributedObject", "UncharacterisedObject")
     out = src[:6] + [l for l in src if any(k in l for k in keep)]
     (root / "reports" / "defects.ttl").write_text("\n".join(out) + "\n")

@@ -15,8 +15,9 @@
   "coverage": {
     "in_both_satcat": 69390,
     "celestrak_only_vs_satcat": 902,
-    "celestrak_only_vs_all_gcat": 900,
-    "recovered_by_auxcat_ftocat": 2
+    "celestrak_only_vs_all_gcat": 622,
+    "recovered_by_other_gcat_catalogues": 280,
+    "gcat_satcat100k_objects": 354
   },
   "error_entries": {
     "gcat_err_objects": 22,
@@ -98,31 +99,71 @@
   },
   "lost_objects": {
     "gcat_ox_objects": 1135,
-    "celestrak_carries_no_decay_date": 1104
+    "celestrak_carries_no_decay_date": 1104,
+    "celestrak_data_status_on_those": {
+      "(blank)": 1094,
+      "NEA": 10
+    },
+    "undisclosed_no_data_status_code": 1094,
+    "celestrak_uses_field_elsewhere": {
+      "NEA": 1041,
+      "NIE": 251
+    }
   },
   "disposition": {
     "shared_objects": 69390,
-    "celestrak_has_decay_date": 35208,
-    "gcat_physically_gone": 34438,
-    "agree_gone": 34275,
-    "gcat_gone_celestrak_silent": 163,
-    "celestrak_decayed_gcat_not_gone": 933,
-    "gcat_left_earth_orbit_not_reentry": 506,
-    "celestrak_decayed_but_gcat_left_earth": 164,
+    "gcat_makes_a_disposition_claim": 68370,
+    "excluded_transition_only": 998,
+    "excluded_error_entries": 22,
+    "agree_gone": 34338,
+    "agree_in_orbit": 33265,
+    "gcat_gone_celestrak_silent": 216,
+    "gcat_in_orbit_celestrak_decayed": 45,
+    "true_disagreement": 261,
+    "gcat_left_earth_orbit": 506,
+    "gone_celestrak_silent_by_status": {
+      "R": 154,
+      "E": 30,
+      "D": 14,
+      "C": 14,
+      "AR": 4
+    },
     "examples_gcat_gone_ct_silent": [
       {
         "norad": "246",
         "celestrak": "THOR ABLESTAR DEB",
         "ct_ops": "",
+        "ct_data_status": "",
         "gcat_statuses": [
           "R"
         ],
         "gcat_ddate": "1994 May 10"
       },
       {
+        "norad": "1244",
+        "celestrak": "GGSE 2",
+        "ct_ops": "",
+        "ct_data_status": "",
+        "gcat_statuses": [
+          "C"
+        ],
+        "gcat_ddate": "1965 May  3"
+      },
+      {
+        "norad": "1292",
+        "celestrak": "GGSE 3",
+        "ct_ops": "",
+        "ct_data_status": "",
+        "gcat_statuses": [
+          "C"
+        ],
+        "gcat_ddate": "1965 May  3"
+      },
+      {
         "norad": "2532",
         "celestrak": "WESTFORD NEEDLES",
         "ct_ops": "",
+        "ct_data_status": "",
         "gcat_statuses": [
           "R"
         ],
@@ -132,6 +173,7 @@
         "norad": "2684",
         "celestrak": "DIAMANT DEB",
         "ct_ops": "",
+        "ct_data_status": "",
         "gcat_statuses": [
           "R"
         ],
@@ -141,84 +183,101 @@
         "norad": "3255",
         "celestrak": "WESTFORD NEEDLES",
         "ct_ops": "",
+        "ct_data_status": "",
         "gcat_statuses": [
           "R"
         ],
         "gcat_ddate": "1976 Oct 30"
       },
       {
+        "norad": "3504",
+        "celestrak": "COSMOS 249",
+        "ct_ops": "",
+        "ct_data_status": "",
+        "gcat_statuses": [
+          "E"
+        ],
+        "gcat_ddate": "1968 Oct 20 0733?"
+      },
+      {
+        "norad": "3530",
+        "celestrak": "COSMOS 252",
+        "ct_ops": "",
+        "ct_data_status": "",
+        "gcat_statuses": [
+          "E"
+        ],
+        "gcat_ddate": "1968 Nov  1 0402?"
+      },
+      {
         "norad": "3609",
         "celestrak": "COSMOS 249 DEB",
         "ct_ops": "",
+        "ct_data_status": "",
         "gcat_statuses": [
           "R"
         ],
         "gcat_ddate": "1982 Dec 26"
       },
       {
+        "norad": "3616",
+        "celestrak": "DELTA 1 R/B",
+        "ct_ops": "",
+        "ct_data_status": "",
+        "gcat_statuses": [
+          "E"
+        ],
+        "gcat_ddate": "1973 Nov 15 2210?"
+      },
+      {
         "norad": "3740",
         "celestrak": "THOR ABLESTAR DEB",
         "ct_ops": "",
+        "ct_data_status": "",
         "gcat_statuses": [
           "R"
         ],
         "gcat_ddate": "1974 Dec 25"
       },
       {
-        "norad": "5702",
-        "celestrak": "WESTFORD NEEDLES",
+        "norad": "4367",
+        "celestrak": "THORAD AGENA D R/B",
         "ct_ops": "",
+        "ct_data_status": "",
         "gcat_statuses": [
-          "R"
+          "E"
         ],
-        "gcat_ddate": "1987 Oct 17"
-      },
-      {
-        "norad": "5716",
-        "celestrak": "THOR ABLESTAR DEB",
-        "ct_ops": "",
-        "gcat_statuses": [
-          "R"
-        ],
-        "gcat_ddate": "1982 Apr  9"
-      },
-      {
-        "norad": "7400",
-        "celestrak": "SL-12 R/B(AUX MOTOR)",
-        "ct_ops": "",
-        "gcat_statuses": [
-          "R"
-        ],
-        "gcat_ddate": "1976 Dec 11"
-      },
-      {
-        "norad": "9008",
-        "celestrak": "OPS 5366",
-        "ct_ops": "",
-        "gcat_statuses": [
-          "R"
-        ],
-        "gcat_ddate": "1990?"
-      },
-      {
-        "norad": "9419",
-        "celestrak": "OPS 5721 DEB",
-        "ct_ops": "",
-        "gcat_statuses": [
-          "R"
-        ],
-        "gcat_ddate": "1985?"
-      },
-      {
-        "norad": "9420",
-        "celestrak": "OPS 5721 DEB",
-        "ct_ops": "",
-        "gcat_statuses": [
-          "R"
-        ],
-        "gcat_ddate": "1985?"
+        "gcat_ddate": "1970 Oct 17 0317"
       }
     ]
+  },
+  "attribution": {
+    "identical_owner_string": 29268,
+    "shared_objects": 69390,
+    "top_scheme_mismatches": {
+      "CIS|SU": 16142,
+      "CIS|RU": 9016,
+      "PRC|CN": 8917,
+      "FR|F": 1438,
+      "JPN|J": 903,
+      "IND|IN": 763,
+      "US|NZ": 157,
+      "IT|I": 141,
+      "GER|D": 136,
+      "ESA|I-ESA": 127,
+      "ORB|US": 95,
+      "CHBZ|CN": 92
+    },
+    "celestrak_owner_tbd": 295,
+    "celestrak_owner_tbd_on_orbit": 180,
+    "celestrak_type_unknown": 162,
+    "celestrak_type_unknown_on_orbit": 53
+  },
+  "characterisation": {
+    "on_orbit_objects": 34814,
+    "with_radar_cross_section": 14616,
+    "without_radar_cross_section": 20198,
+    "on_orbit_without_orbital_period": 618
   },
   "gcat_duplicate_satcat": {
     "count": 3,

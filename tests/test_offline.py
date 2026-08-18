@@ -32,13 +32,42 @@ class TestStatusSemantics(unittest.TestCase):
     """Status classification must not conflate reentry with leaving Earth orbit."""
 
     def test_gone_and_left_earth_are_disjoint(self):
-        from reconcile import GONE, LEFT_EARTH, ERROR, LOST
-        self.assertEqual(GONE & LEFT_EARTH, set())
-        self.assertIn("R", GONE)
-        self.assertIn("D", GONE)
+        from reconcile import DESTROYED, LEFT_EARTH, ERROR, LOST
+        self.assertEqual(DESTROYED & LEFT_EARTH, set())
+        self.assertIn("R", DESTROYED)
+        self.assertIn("D", DESTROYED)
         self.assertIn("DSO", LEFT_EARTH)
         self.assertIn("ERR", ERROR)
         self.assertIn("OX", LOST)
+
+    def test_destruction_codes_are_not_in_orbit(self):
+        """Regression for the error that inflated disagreement by 3.6x.
+
+        E and C destroy the object. They were originally classified as
+        "still in orbit", which is what produced the wrong 932.
+        """
+        from reconcile import DESTROYED, INORBIT
+        self.assertIn("E", DESTROYED)
+        self.assertIn("C", DESTROYED)
+        self.assertEqual(DESTROYED & INORBIT, set())
+
+    def test_transitions_are_not_disposition_claims(self):
+        """Docking and attachment end a phase without ending the object."""
+        from reconcile import TRANSITION, DESTROYED, INORBIT, LEFT_EARTH
+        for code in ("DK", "ATT", "TFR", "GRP"):
+            self.assertIn(code, TRANSITION)
+        self.assertEqual(TRANSITION & (DESTROYED | INORBIT | LEFT_EARTH), set())
+
+    def test_uncertainty_marker_is_stripped(self):
+        from reconcile import norm_status, DESTROYED
+        self.assertIn(norm_status("R?"), DESTROYED)
+        self.assertIn(norm_status("L?"), DESTROYED)
+
+    def test_all_four_gcat_catalogues_are_harvested(self):
+        """satcat100k was missed once and moved the coverage gap by 280."""
+        from reconcile import CATALOGUES
+        self.assertIn("gcat_satcat100k.tsv", CATALOGUES)
+        self.assertEqual(len(CATALOGUES), 4)
 
     def test_err_is_not_a_disposition(self):
         """An error entry is not 'gone'; it never existed."""

@@ -86,3 +86,7 @@ space:GcatAuxcat a space:Catalogue ;
 space:GcatFtocat a space:Catalogue ;
   skos:prefLabel "GCAT ftocat" ;
   rdfs:seeAlso <https://planet4589.org/space/gcat/tsv/cat/ftocat.tsv> .
+
+scheme:PhaseTransition a skos:Concept ; skos:inScheme scheme:disposition ;
+  skos:prefLabel "Phase transition" ;
+  skos:definition "The catalogue's record for this object ends because the object joined, was attached to, or was transferred into another object. The catalogue is making no claim about current disposition, so such entries must be excluded from a disposition comparison rather than counted as disagreement." .

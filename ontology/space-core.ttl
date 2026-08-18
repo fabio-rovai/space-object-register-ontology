@@ -148,3 +148,11 @@ space:conformancePattern a owl:DatatypeProperty ; rdfs:domain space:IdentifierSc
   rdfs:comment "The scheme's own declared regular expression. The pipeline validates against this value rather than against hard-coded logic." .
 space:schemeAuthority a owl:DatatypeProperty ; rdfs:domain space:IdentifierScheme ; rdfs:range xsd:string ;
   rdfs:label "scheme authority" .
+
+space:UnattributedObject a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Unattributed object" ;
+  rdfs:comment "An on-orbit object whose owner the catalogue records as undetermined. Attribution is a positive-identification question, so an unattributed on-orbit object is an open identification, not a clerical gap." .
+
+space:UncharacterisedObject a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Uncharacterised object" ;
+  rdfs:comment "An on-orbit object for which the catalogue publishes no radar cross section, so no size or mass estimate can be derived from the public record." .
