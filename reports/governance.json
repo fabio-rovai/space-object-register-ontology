@@ -2,21 +2,25 @@
   "python": {
     "PhantomEntry": 22,
     "PhantomEntryOnOrbit": 1,
-    "UndisclosedTrackingLoss": 1104,
-    "DispositionDisagreement": 932,
-    "CoverageGap": 900,
+    "UndisclosedTrackingLoss": 1094,
+    "DispositionDisagreement": 261,
+    "CoverageGap": 622,
     "UnnumberedObject": 605,
+    "UnattributedObject": 180,
+    "UncharacterisedObject": 20198,
     "IdentifierCollision": 3
   },
   "sparql": {
     "PhantomEntry": 22,
     "PhantomEntryOnOrbit": 1,
-    "UndisclosedTrackingLoss": 1104,
-    "DispositionDisagreement": 932,
-    "CoverageGap": 900,
+    "UndisclosedTrackingLoss": 1094,
+    "DispositionDisagreement": 261,
+    "CoverageGap": 622,
     "UnnumberedObject": 605,
+    "UnattributedObject": 180,
+    "UncharacterisedObject": 20198,
     "IdentifierCollision": 3
   },
-  "triples": 2330660,
+  "triples": 2367485,
   "agree": true
 }
