@@ -1,5 +1,7 @@
 # Space Object Register Ontology
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22002834.svg)](https://doi.org/10.5281/zenodo.22002834)
+
 An open ontology for the integrity of space object catalogues, tested against
 CelesTrak's SATCAT and Jonathan McDowell's General Catalog of Artificial Space
 Objects.
@@ -133,6 +135,17 @@ above exist only because he recorded them. This work does not replace that. It
 makes the disagreements between catalogues machine-checkable, and it reports
 three candidate defects back to GCAT rather than publishing them as someone
 else's problem.
+
+## Citing this work
+
+Cite the concept DOI, which always resolves to the newest version:
+
+> Rovai, F. and Kampakis and Co. Ltd, 2026. Space Object Register Ontology.
+> https://doi.org/10.5281/zenodo.22002834
+
+Cite the version DOI, 10.5281/zenodo.22002835, when a claim depends on the exact
+numbers in this release, which is the normal case for the findings above, because
+both source catalogues change daily.
 
 ## Licence
 
