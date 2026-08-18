@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+title: Space Object Register Ontology
+message: If you use this work, please cite it.
+type: software
+authors:
+  - family-names: Rovai
+    given-names: Fabio
+  - name: "Kampakis and Co. Ltd (The Tesseract Academy)"
+repository-code: "https://github.com/fabio-rovai/space-object-register-ontology"
+abstract: >-
+  An ontology for the integrity of space object catalogues, in which identity
+  and disposition are dated claims by a named catalogue rather than properties
+  of an object, tested against CelesTrak SATCAT and McDowell's General Catalog
+  of Artificial Space Objects.
+keywords:
+  - space domain awareness
+  - resident space object
+  - register integrity
+  - ontology
+  - SHACL
+license: MIT
