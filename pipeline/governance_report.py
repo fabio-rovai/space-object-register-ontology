@@ -35,10 +35,12 @@ def python_side():
 
 def sparql_side():
     g = rdflib.Graph()
-    # The defect subgraph, not the full 88 MB graph. rdflib needs over an hour
-    # and about 5 GB to parse the full file; the gate only needs the defect layer,
-    # and the SPARQL evaluation stays independent of the Python set logic either way.
-    g.parse(ROOT / "reports" / "defects.ttl", format="turtle")
+    # Full graph by default. rdflib takes over an hour and about 5 GB on it, so
+    # set SORO_FAST=1 to verify against the defect subgraph instead when iterating.
+    # The published numbers come from the full graph.
+    import os
+    name = "defects.ttl" if os.environ.get("SORO_FAST") else "graph.ttl"
+    g.parse(ROOT / "reports" / name, format="turtle")
     print(f"  graph parsed: {len(g):,} triples", flush=True)
     out = {}
     for cls in ["PhantomEntry", "PhantomEntryOnOrbit", "UndisclosedTrackingLoss",

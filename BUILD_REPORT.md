@@ -164,23 +164,36 @@ which is the property the layering was designed for.
 ## A finding about our own tooling
 
 The full graph is 2,330,660 triples in 88.2 MB of Turtle. Emitting it as text
-takes 8 seconds. Reading it back is where the cost sits, and the two engines are
-not close:
+takes 8 seconds. Reading it back is where the cost sits:
 
 | Engine | Result |
 |---|---|
 | `open-ontologies` (Rust) | 2,330,660 triples loaded in 66 seconds |
-| `rdflib` 7.6.0 | killed after 55 minutes at 4.97 GB resident, still parsing |
+| `rdflib` 7.6.0 | same 2,330,660 triples, over an hour, about 4.97 GB resident |
 
-This extends what we already knew about rdflib at scale. The recorded limit was
-that multi-way self-joins over reified nodes time out while parsing and
-serialising remain usable. At 2.3M triples the parse itself is no longer usable.
+**Correction, made after this report was first written.** The first version of
+this section said the rdflib run had been killed at 55 minutes and had not
+finished. That was wrong. The run completed and its result is the one recorded
+in the verification table above, computed over the full graph rather than over
+any subset. The error was ours: the process was assumed dead because it was
+still parsing when checked at 55 minutes, and a kill was issued that did not
+take effect before it finished. The engine comparison stands, because 66 seconds
+against more than an hour is the same conclusion, but the claim that rdflib
+could not complete the parse was not true and the corrected figure is above.
+
+This still extends what we already knew about rdflib at scale. The recorded
+limit was that multi-way self-joins over reified nodes time out while parsing
+and serialising remain usable. At 2.3M triples parsing remains possible but
+costs roughly sixty times what the Rust engine costs, and about 5 GB of memory.
 
 Two limitations in our own engine surfaced while working around this, and both
 are ours to fix rather than to write around quietly. `load` and `query` do not
 share an in-memory store across separate process invocations, and `batch` cannot
 run SPARQL, which is already filed as open-ontologies issue 100. Together they
 mean the fast loader cannot currently be used for the verification query in one
-pass. The gate therefore verifies against a defect subgraph of 11,142 triples,
-which parses in 3.1 seconds and contains every node the findings depend on. The
-full graph remains the regenerable evidence base.
+pass.
+
+`pipeline/build_graph.py` also emits a defect subgraph of 11,142 triples, which
+parses in 3.1 seconds and contains every node the findings depend on. That is a
+convenience for fast iteration. It is not what the published numbers rest on:
+those come from the full graph.
