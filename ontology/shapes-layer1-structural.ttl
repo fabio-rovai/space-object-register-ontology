@@ -1,0 +1,26 @@
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix space: <https://gov.tesseract.academy/def/space#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+space:AssertionShape a sh:NodeShape ;
+  sh:targetClass space:Assertion , space:IdentifierAssertion , space:DispositionAssertion ,
+                 space:ExistenceAssertion , space:TrackingAssertion ;
+  sh:property [ sh:path space:assertedBy ; sh:minCount 1 ; sh:nodeKind sh:IRI ;
+                sh:message "Every assertion must name the catalogue that made it." ] ;
+  sh:property [ sh:path space:assertedOn ; sh:minCount 1 ; sh:datatype xsd:date ;
+                sh:message "Every assertion must carry the harvest date; assertion identity includes the date." ] ;
+  sh:property [ sh:path space:aboutEntry ; sh:minCount 1 ; sh:nodeKind sh:IRI ;
+                sh:message "Every assertion must be about a catalogue entry." ] .
+
+space:IdentifierAssertionShape a sh:NodeShape ;
+  sh:targetClass space:IdentifierAssertion ;
+  sh:property [ sh:path space:identifierValue ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path space:inScheme ; sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+  sh:property [ sh:path space:schemeConformant ; sh:minCount 1 ; sh:datatype xsd:boolean ] ;
+  sh:property [ sh:path space:resolutionCardinality ; sh:minCount 1 ; sh:datatype xsd:integer ;
+                sh:minInclusive 1 ] .
+
+space:EntryShape a sh:NodeShape ;
+  sh:targetClass space:CatalogueEntry ;
+  sh:property [ sh:path space:aboutObject ; sh:minCount 1 ; sh:nodeKind sh:IRI ;
+                sh:message "An entry must point at the object it claims to describe, even when that object turns out not to exist." ] .

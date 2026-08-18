@@ -1,0 +1,25 @@
+@prefix sh:     <http://www.w3.org/ns/shacl#> .
+@prefix space:  <https://gov.tesseract.academy/def/space#> .
+@prefix scheme: <https://gov.tesseract.academy/def/space/scheme#> .
+
+space:CosparConformanceShape a sh:NodeShape ;
+  sh:targetClass space:IdentifierAssertion ;
+  sh:property [
+    sh:path space:identifierValue ;
+    sh:pattern "^[0-9]{4}-[0-9]{3}[A-Z]{1,3}$" ;
+    sh:severity sh:Violation ;
+    sh:message "COSPAR international designator does not match the pattern the scheme declares." ] ;
+  sh:sparql [
+    sh:message "Identifier assertion is in the COSPAR scheme but was not tested against the COSPAR pattern." ;
+    sh:select """
+      SELECT $this WHERE {
+        $this <https://gov.tesseract.academy/def/space#inScheme> <https://gov.tesseract.academy/def/space/scheme#cospar> .
+        FILTER NOT EXISTS { $this <https://gov.tesseract.academy/def/space#schemeConformant> ?c }
+      }""" ] .
+
+space:NoCollisionShape a sh:NodeShape ;
+  sh:targetClass space:IdentifierAssertion ;
+  sh:property [
+    sh:path space:resolutionCardinality ;
+    sh:maxInclusive 1 ;
+    sh:message "Identifier value resolves to more than one object inside a single catalogue." ] .

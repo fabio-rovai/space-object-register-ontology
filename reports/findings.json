@@ -1,0 +1,346 @@
+{
+  "harvest": {
+    "celestrak_objects": 70292,
+    "gcat_satcat_phases": 69999,
+    "gcat_satcat_objects": 69391,
+    "gcat_auxcat_phases": 11962,
+    "gcat_auxcat_objects": 1954,
+    "gcat_ftocat_phases": 1802,
+    "gcat_satcat_no_norad_rows": 605
+  },
+  "phases_per_object": {
+    "objects_with_multiple_phases": 3,
+    "max_phases_on_one_object": 2
+  },
+  "coverage": {
+    "in_both_satcat": 69390,
+    "celestrak_only_vs_satcat": 902,
+    "celestrak_only_vs_all_gcat": 900,
+    "recovered_by_auxcat_ftocat": 2
+  },
+  "error_entries": {
+    "gcat_err_objects": 22,
+    "also_listed_by_celestrak": 22,
+    "examples": [
+      {
+        "norad": "4494",
+        "gcat_name": "[Reassigned to S19981]",
+        "celestrak_name": "MIDAS 5 DEB",
+        "celestrak_decay": "1977-05-22"
+      },
+      {
+        "norad": "4925",
+        "gcat_name": "Explorer XXVI dup?",
+        "celestrak_name": "DELTA 1 DEB",
+        "celestrak_decay": "1983-12-19"
+      },
+      {
+        "norad": "5703",
+        "gcat_name": "[Reassigned to S18603]",
+        "celestrak_name": "MIDAS 5 DEB",
+        "celestrak_decay": "1976-11-07"
+      },
+      {
+        "norad": "5820",
+        "gcat_name": "Altair",
+        "celestrak_name": "DELTA 1 DEB",
+        "celestrak_decay": "1972-02-01"
+      },
+      {
+        "norad": "7965",
+        "gcat_name": "Spurious debris?",
+        "celestrak_name": "DELTA 1 DEB",
+        "celestrak_decay": "1975-07-10"
+      },
+      {
+        "norad": "9633",
+        "gcat_name": "Cataloging error",
+        "celestrak_name": "COSMOS 861 DEB",
+        "celestrak_decay": "1976-10-21"
+      },
+      {
+        "norad": "10909",
+        "gcat_name": "Radar error",
+        "celestrak_name": "COSMOS 965 DEB",
+        "celestrak_decay": "1978-12-04"
+      },
+      {
+        "norad": "10910",
+        "gcat_name": "Radar error",
+        "celestrak_name": "COSMOS 965 DEB",
+        "celestrak_decay": "1978-12-04"
+      },
+      {
+        "norad": "11006",
+        "gcat_name": "Delta 150 duplicate",
+        "celestrak_name": "DELTA 1 R/B(2)",
+        "celestrak_decay": ""
+      },
+      {
+        "norad": "11411",
+        "gcat_name": "Radar error?",
+        "celestrak_name": "OPS 5390 DEB",
+        "celestrak_decay": "1982-06-08"
+      },
+      {
+        "norad": "11412",
+        "gcat_name": "Radar error?",
+        "celestrak_name": "OPS 5390 DEB",
+        "celestrak_decay": "1982-02-23"
+      },
+      {
+        "norad": "11725",
+        "gcat_name": "Radar error?",
+        "celestrak_name": "SL-8 DEB",
+        "celestrak_decay": "1980-03-05"
+      }
+    ]
+  },
+  "lost_objects": {
+    "gcat_ox_objects": 1135,
+    "celestrak_carries_no_decay_date": 1104
+  },
+  "disposition": {
+    "shared_objects": 69390,
+    "celestrak_has_decay_date": 35208,
+    "gcat_physically_gone": 34438,
+    "agree_gone": 34275,
+    "gcat_gone_celestrak_silent": 163,
+    "celestrak_decayed_gcat_not_gone": 933,
+    "gcat_left_earth_orbit_not_reentry": 506,
+    "celestrak_decayed_but_gcat_left_earth": 164,
+    "examples_gcat_gone_ct_silent": [
+      {
+        "norad": "246",
+        "celestrak": "THOR ABLESTAR DEB",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1994 May 10"
+      },
+      {
+        "norad": "2532",
+        "celestrak": "WESTFORD NEEDLES",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1987 Oct 17"
+      },
+      {
+        "norad": "2684",
+        "celestrak": "DIAMANT DEB",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1980 Jun 22"
+      },
+      {
+        "norad": "3255",
+        "celestrak": "WESTFORD NEEDLES",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1976 Oct 30"
+      },
+      {
+        "norad": "3609",
+        "celestrak": "COSMOS 249 DEB",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1982 Dec 26"
+      },
+      {
+        "norad": "3740",
+        "celestrak": "THOR ABLESTAR DEB",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1974 Dec 25"
+      },
+      {
+        "norad": "5702",
+        "celestrak": "WESTFORD NEEDLES",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1987 Oct 17"
+      },
+      {
+        "norad": "5716",
+        "celestrak": "THOR ABLESTAR DEB",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1982 Apr  9"
+      },
+      {
+        "norad": "7400",
+        "celestrak": "SL-12 R/B(AUX MOTOR)",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1976 Dec 11"
+      },
+      {
+        "norad": "9008",
+        "celestrak": "OPS 5366",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1990?"
+      },
+      {
+        "norad": "9419",
+        "celestrak": "OPS 5721 DEB",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1985?"
+      },
+      {
+        "norad": "9420",
+        "celestrak": "OPS 5721 DEB",
+        "ct_ops": "",
+        "gcat_statuses": [
+          "R"
+        ],
+        "gcat_ddate": "1985?"
+      }
+    ]
+  },
+  "gcat_duplicate_satcat": {
+    "count": 3,
+    "cases": [
+      {
+        "norad": "66898",
+        "entries": [
+          {
+            "jcat": "S66898",
+            "name": "Starlink 36065",
+            "status": "O",
+            "ldate": "2025 Dec  4"
+          },
+          {
+            "jcat": "S69898",
+            "name": "GRUS-3E",
+            "status": "O",
+            "ldate": "2026 Jul  7"
+          }
+        ],
+        "celestrak_name": "STARLINK-36065"
+      },
+      {
+        "norad": "66903",
+        "entries": [
+          {
+            "jcat": "S66903",
+            "name": "Starlink 36077",
+            "status": "O",
+            "ldate": "2025 Dec  4"
+          },
+          {
+            "jcat": "S69903",
+            "name": "Balkan-3",
+            "status": "O",
+            "ldate": "2026 Jul  7"
+          }
+        ],
+        "celestrak_name": "STARLINK-36077"
+      },
+      {
+        "norad": "68488",
+        "entries": [
+          {
+            "jcat": "S68468",
+            "name": "DB-BECON-2-VU",
+            "status": "O",
+            "ldate": "2026 Mar 30"
+          },
+          {
+            "jcat": "S68488",
+            "name": "Vindler 2.0.1",
+            "status": "O",
+            "ldate": "2026 Mar 30"
+          }
+        ],
+        "celestrak_name": "VINDLER 2.1"
+      }
+    ]
+  },
+  "identifier_conformance": {
+    "celestrak_objects": 70292,
+    "cospar_non_conformant": 0,
+    "cospar_designators_on_multiple_norad": 0,
+    "duplicate_norad_numbers": 0
+  },
+  "unnumbered": {
+    "gcat_satcat_rows_without_norad": 605,
+    "distinct_placeholder_values": [
+      "NNA"
+    ],
+    "examples": [
+      {
+        "name": "Luliang-1",
+        "status": "R",
+        "ldate": "2015 Sep 19"
+      },
+      {
+        "name": "Naxing-2",
+        "status": "O",
+        "ldate": "2015 Sep 19"
+      },
+      {
+        "name": "Iskra-MAI-85",
+        "status": "O",
+        "ldate": "2017 Jul 14"
+      },
+      {
+        "name": "Mayak",
+        "status": "R",
+        "ldate": "2017 Jul 14"
+      },
+      {
+        "name": "Ekvador-UTE-YuZGU",
+        "status": "O",
+        "ldate": "2017 Jul 14"
+      },
+      {
+        "name": "MKA-N 1",
+        "status": "O",
+        "ldate": "2017 Jul 14"
+      },
+      {
+        "name": "MKA-N 2",
+        "status": "O",
+        "ldate": "2017 Jul 14"
+      },
+      {
+        "name": "CICERO-1",
+        "status": "O",
+        "ldate": "2017 Jul 14"
+      },
+      {
+        "name": "CICERO-2",
+        "status": "O",
+        "ldate": "2017 Jul 14"
+      },
+      {
+        "name": "CICERO-3",
+        "status": "O",
+        "ldate": "2017 Jul 14"
+      }
+    ]
+  }
+}

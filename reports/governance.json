@@ -1,0 +1,22 @@
+{
+  "python": {
+    "PhantomEntry": 22,
+    "PhantomEntryOnOrbit": 1,
+    "UndisclosedTrackingLoss": 1104,
+    "DispositionDisagreement": 932,
+    "CoverageGap": 900,
+    "UnnumberedObject": 605,
+    "IdentifierCollision": 3
+  },
+  "sparql": {
+    "PhantomEntry": 22,
+    "PhantomEntryOnOrbit": 1,
+    "UndisclosedTrackingLoss": 1104,
+    "DispositionDisagreement": 932,
+    "CoverageGap": 900,
+    "UnnumberedObject": 605,
+    "IdentifierCollision": 3
+  },
+  "triples": 2330660,
+  "agree": true
+}

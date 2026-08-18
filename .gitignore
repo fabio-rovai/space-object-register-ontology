@@ -1,0 +1,4 @@
+data/*.csv
+data/*.tsv
+reports/graph.ttl
+__pycache__/

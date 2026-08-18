@@ -1,0 +1,88 @@
+@prefix space:  <https://gov.tesseract.academy/def/space#> .
+@prefix scheme: <https://gov.tesseract.academy/def/space/scheme#> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+## ------------------------------------------------- identifier schemes
+
+scheme:norad a space:IdentifierScheme , skos:ConceptScheme ;
+  skos:prefLabel "NORAD catalog number" ;
+  space:schemeAuthority "United States Space Force, 18th Space Defense Squadron" ;
+  space:conformancePattern "^[0-9]{1,6}$" ;
+  rdfs:comment "A sequential integer. It carries no check digit, so a transcription error in a NORAD number produces another syntactically valid NORAD number and cannot be detected within the scheme." .
+
+scheme:cospar a space:IdentifierScheme , skos:ConceptScheme ;
+  skos:prefLabel "COSPAR international designator" ;
+  space:schemeAuthority "Committee on Space Research, assigned via the United Nations registry convention" ;
+  space:conformancePattern "^[0-9]{4}-[0-9]{3}[A-Z]{1,3}$" ;
+  rdfs:comment "Launch year, launch number within that year, and a piece letter. Unlike the NORAD number it is structured and therefore partially self-checking." .
+
+scheme:jcat a space:IdentifierScheme , skos:ConceptScheme ;
+  skos:prefLabel "JCAT identifier" ;
+  space:schemeAuthority "Jonathan C. McDowell, General Catalog of Artificial Space Objects" ;
+  space:conformancePattern "^[A-Z][0-9]{5}$" ;
+  rdfs:comment "GCAT's own identifier, independent of the NORAD number, which is what makes a NORAD transcription error inside GCAT detectable at all." .
+
+## ------------------------------------------------------ dispositions
+
+scheme:disposition a skos:ConceptScheme ; skos:prefLabel "Space object disposition" .
+
+scheme:OnOrbit a skos:Concept ; skos:inScheme scheme:disposition ;
+  skos:prefLabel "On orbit" ; skos:definition "In free flight around the central body." .
+scheme:Reentered a skos:Concept ; skos:inScheme scheme:disposition ;
+  skos:prefLabel "Reentered" ; skos:definition "Destroyed in the atmosphere of the central body." .
+scheme:LeftEarthOrbit a skos:Concept ; skos:inScheme scheme:disposition ;
+  skos:prefLabel "Left Earth orbit" ;
+  skos:definition "Departed Earth orbit without reentering, for example by passing the deep space boundary. Distinct from reentry, and conflating the two inflates any reentry disagreement count." .
+scheme:NotAnObject a skos:Concept ; skos:inScheme scheme:disposition ;
+  skos:prefLabel "Not an object" ;
+  skos:definition "The entry corresponds to no physical object. It is a tracking or cataloguing artefact." .
+scheme:Untracked a skos:Concept ; skos:inScheme scheme:disposition ;
+  skos:prefLabel "Untracked" ;
+  skos:definition "Presumed on orbit but with no recent tracking data." .
+
+## -------------------------------- GCAT phase status codes, as published
+## Source: planet4589.org/space/gcat/web/intro/phases.html, retrieved 2026-08-18.
+## Reproduced as a controlled vocabulary of codes and their mapped meaning;
+## the definitions below are our mapping, not McDowell's wording.
+
+scheme:gcatStatus a skos:ConceptScheme ;
+  skos:prefLabel "GCAT phase status code" ;
+  space:schemeAuthority "Jonathan C. McDowell" .
+
+scheme:gcat-O   a skos:Concept ; skos:inScheme scheme:gcatStatus ; skos:notation "O" ;
+  skos:prefLabel "In orbit" ; skos:broadMatch scheme:OnOrbit .
+scheme:gcat-OX  a skos:Concept ; skos:inScheme scheme:gcatStatus ; skos:notation "OX" ;
+  skos:prefLabel "In orbit but lost" ; skos:broadMatch scheme:Untracked .
+scheme:gcat-R   a skos:Concept ; skos:inScheme scheme:gcatStatus ; skos:notation "R" ;
+  skos:prefLabel "Reentered" ; skos:broadMatch scheme:Reentered .
+scheme:gcat-D   a skos:Concept ; skos:inScheme scheme:gcatStatus ; skos:notation "D" ;
+  skos:prefLabel "Deorbited" ; skos:broadMatch scheme:Reentered .
+scheme:gcat-L   a skos:Concept ; skos:inScheme scheme:gcatStatus ; skos:notation "L" ;
+  skos:prefLabel "Landed" ; skos:broadMatch scheme:Reentered .
+scheme:gcat-DSO a skos:Concept ; skos:inScheme scheme:gcatStatus ; skos:notation "DSO" ;
+  skos:prefLabel "Deep space" ; skos:broadMatch scheme:LeftEarthOrbit .
+scheme:gcat-ERR a skos:Concept ; skos:inScheme scheme:gcatStatus ; skos:notation "ERR" ;
+  skos:prefLabel "Error" ; skos:broadMatch scheme:NotAnObject ;
+  skos:scopeNote "The only status in either catalogue that lets a register state that one of its own entries is not a real object." .
+
+## ---------------------------------------------------------- catalogues
+
+space:CelestrakSatcat a space:Catalogue ;
+  skos:prefLabel "CelesTrak SATCAT" ;
+  space:schemeAuthority "CelesTrak, Dr T. S. Kelso" ;
+  rdfs:seeAlso <https://celestrak.org/pub/satcat.csv> .
+
+space:GcatSatcat a space:Catalogue ;
+  skos:prefLabel "GCAT satcat" ;
+  space:schemeAuthority "Jonathan C. McDowell" ;
+  rdfs:seeAlso <https://planet4589.org/space/gcat/tsv/cat/satcat.tsv> .
+
+space:GcatAuxcat a space:Catalogue ;
+  skos:prefLabel "GCAT auxcat" ;
+  rdfs:seeAlso <https://planet4589.org/space/gcat/tsv/cat/auxcat.tsv> .
+
+space:GcatFtocat a space:Catalogue ;
+  skos:prefLabel "GCAT ftocat" ;
+  rdfs:seeAlso <https://planet4589.org/space/gcat/tsv/cat/ftocat.tsv> .

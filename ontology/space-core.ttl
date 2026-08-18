@@ -1,0 +1,150 @@
+@prefix space: <https://gov.tesseract.academy/def/space#> .
+@prefix owl:   <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos:  <http://www.w3.org/2004/02/skos/core#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix prov:  <http://www.w3.org/ns/prov#> .
+
+<https://gov.tesseract.academy/def/space> a owl:Ontology ;
+  dcterms:title "Space Object Register Ontology" ;
+  dcterms:description "An ontology for the integrity of space object catalogues. Identity and disposition are never properties of an object; they are dated claims made by a named catalogue, so that two catalogues disagreeing about the same object is expressible rather than a data error." ;
+  dcterms:license <https://creativecommons.org/licenses/by/4.0/> ;
+  owl:versionInfo "0.1.0" .
+
+## ---------------------------------------------------------------- things
+
+space:SpaceObject a owl:Class ;
+  rdfs:label "Space object" ;
+  rdfs:comment "A physical artificial object in, or formerly in, space. Deliberately independent of any catalogue: two catalogues may describe the same space object under different identifiers." .
+
+space:Catalogue a owl:Class ;
+  rdfs:label "Catalogue" ;
+  rdfs:comment "A register that publishes identifiers and dispositions for space objects." .
+
+space:CatalogueEntry a owl:Class ;
+  rdfs:label "Catalogue entry" ;
+  rdfs:comment "A row in a catalogue. An entry is not the same thing as a space object: an entry may correspond to no object at all." .
+
+space:IdentifierScheme a owl:Class ;
+  rdfs:subClassOf skos:ConceptScheme ;
+  rdfs:label "Identifier scheme" ;
+  rdfs:comment "A scheme that declares its own conformance rules as data, so identifiers are validated against the declared rule rather than against hard-coded logic." .
+
+## ---------------------------------------------------------- reified claims
+
+space:Assertion a owl:Class ;
+  rdfs:label "Assertion" ;
+  rdfs:comment "A dated claim by a named source. Assertion identity always includes the date, so two claims made on different dates never collapse into one node." .
+
+space:IdentifierAssertion a owl:Class ;
+  rdfs:subClassOf space:Assertion ;
+  rdfs:label "Identifier assertion" ;
+  rdfs:comment "Catalogue C published identifier I, in scheme S, for entry E, on date D." .
+
+space:DispositionAssertion a owl:Class ;
+  rdfs:subClassOf space:Assertion ;
+  rdfs:label "Disposition assertion" ;
+  rdfs:comment "Catalogue C asserted that the object of entry E had disposition P on date D. Silence is a position: a catalogue that publishes no decay date is asserting the object is on orbit." .
+
+space:ExistenceAssertion a owl:Class ;
+  rdfs:subClassOf space:Assertion ;
+  rdfs:label "Existence assertion" ;
+  rdfs:comment "Catalogue C asserted that entry E does, or does not, correspond to a real physical object." .
+
+space:TrackingAssertion a owl:Class ;
+  rdfs:subClassOf space:Assertion ;
+  rdfs:label "Tracking assertion" ;
+  rdfs:comment "Catalogue C asserted the tracking state of entry E: currently tracked, or presumed on orbit but no longer tracked." .
+
+space:Disagreement a owl:Class ;
+  rdfs:subClassOf space:Assertion ;
+  rdfs:label "Disagreement" ;
+  rdfs:comment "A reified disagreement between two catalogues about the same object. A disagreement is a finding, not an error to be resolved away." .
+
+## ------------------------------------------------------- defect classes
+
+space:Defect a owl:Class ;
+  rdfs:label "Defect" ;
+  rdfs:comment "A named, testable integrity defect. One SHACL shape per defect class, so the validation report is the findings table." .
+
+space:PhantomEntry a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Phantom entry" ;
+  rdfs:comment "An entry that one catalogue states corresponds to no real object, and that another catalogue still carries." .
+
+space:PhantomEntryOnOrbit a owl:Class ; rdfs:subClassOf space:PhantomEntry ;
+  rdfs:label "Phantom entry carried as on orbit" ;
+  rdfs:comment "The severe case: an entry known to correspond to no object is carried by another catalogue with no decay date, and therefore counts as a tracked on-orbit object." .
+
+space:UndisclosedTrackingLoss a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Undisclosed tracking loss" ;
+  rdfs:comment "One catalogue records that an object is no longer tracked while another presents it as a normal on-orbit object with no such qualification." .
+
+space:DispositionDisagreement a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Disposition disagreement" ;
+  rdfs:comment "Two catalogues disagree about whether an object is still in orbit." .
+
+space:CoverageGap a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Coverage gap" ;
+  rdfs:comment "An object present in one catalogue and absent from the other, after all of the other's catalogues have been checked." .
+
+space:UnnumberedObject a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Unnumbered object" ;
+  rdfs:comment "An object a catalogue tracks for which no identifier in the reference scheme has been assigned." .
+
+space:IdentifierCollision a owl:Class ; rdfs:subClassOf space:Defect ;
+  rdfs:label "Identifier collision" ;
+  rdfs:comment "One identifier value asserted for more than one distinct object within a single catalogue." .
+
+## ------------------------------------------------------------ properties
+
+space:assertedBy a owl:ObjectProperty ; rdfs:domain space:Assertion ; rdfs:range space:Catalogue ;
+  rdfs:label "asserted by" .
+space:assertedOn a owl:DatatypeProperty ; rdfs:domain space:Assertion ; rdfs:range xsd:date ;
+  rdfs:label "asserted on" ; rdfs:comment "Harvest date. Part of assertion identity." .
+space:aboutEntry a owl:ObjectProperty ; rdfs:domain space:Assertion ; rdfs:range space:CatalogueEntry ;
+  rdfs:label "about entry" .
+space:aboutObject a owl:ObjectProperty ; rdfs:range space:SpaceObject ;
+  rdfs:label "about object" ;
+  rdfs:comment "rdfs:domain is deliberately omitted. This property is used on both catalogue entries and assertions, and in OWL rdfs:domain is an inference rather than a constraint, so declaring either class would make a reasoner assert a false type for the other. Our own lint reports this as an informational finding and the omission is intentional." .
+
+space:identifierValue a owl:DatatypeProperty ; rdfs:domain space:IdentifierAssertion ; rdfs:range xsd:string ;
+  rdfs:label "identifier value" .
+space:inScheme a owl:ObjectProperty ; rdfs:domain space:IdentifierAssertion ; rdfs:range space:IdentifierScheme ;
+  rdfs:label "in scheme" .
+space:schemeConformant a owl:DatatypeProperty ; rdfs:domain space:IdentifierAssertion ; rdfs:range xsd:boolean ;
+  rdfs:label "scheme conformant" .
+space:nonConformanceReason a owl:DatatypeProperty ; rdfs:domain space:IdentifierAssertion ; rdfs:range xsd:string ;
+  rdfs:label "non-conformance reason" .
+space:resolutionCardinality a owl:DatatypeProperty ; rdfs:domain space:IdentifierAssertion ; rdfs:range xsd:integer ;
+  rdfs:label "resolution cardinality" ;
+  rdfs:comment "How many distinct objects this identifier value resolves to within the asserting catalogue. A value above one is a collision." .
+
+space:disposition a owl:ObjectProperty ; rdfs:domain space:DispositionAssertion ; rdfs:range skos:Concept ;
+  rdfs:label "disposition" .
+space:dispositionDate a owl:DatatypeProperty ; rdfs:domain space:DispositionAssertion ;
+  rdfs:label "disposition date" ;
+  rdfs:comment "Kept as a string. Source catalogues publish vague dates such as '1990?' and '2010 Q3?', and coercing those to xsd:date destroys the uncertainty the source deliberately recorded." .
+
+space:correspondsToRealObject a owl:DatatypeProperty ; rdfs:domain space:ExistenceAssertion ; rdfs:range xsd:boolean ;
+  rdfs:label "corresponds to a real object" .
+space:existenceNote a owl:DatatypeProperty ; rdfs:domain space:ExistenceAssertion ; rdfs:range xsd:string ;
+  rdfs:label "existence note" ;
+  rdfs:comment "The asserting catalogue's own stated reason, for example 'Radar error' or 'Cataloging error'." .
+
+space:currentlyTracked a owl:DatatypeProperty ; rdfs:domain space:TrackingAssertion ; rdfs:range xsd:boolean ;
+  rdfs:label "currently tracked" .
+
+space:disagreementBetween a owl:ObjectProperty ; rdfs:domain space:Disagreement ; rdfs:range space:Catalogue ;
+  rdfs:label "disagreement between" .
+space:disagreementField a owl:DatatypeProperty ; rdfs:domain space:Disagreement ; rdfs:range xsd:string ;
+  rdfs:label "disagreement field" .
+space:exhibitsDefect a owl:ObjectProperty ; rdfs:range space:Defect ;
+  rdfs:label "exhibits defect" ;
+  rdfs:comment "rdfs:domain is deliberately omitted for the same reason as space:aboutObject: defects are exhibited by both space objects and catalogue entries, and the distinction matters here because a phantom entry is precisely a case where the entry exists and the object does not." .
+
+space:conformancePattern a owl:DatatypeProperty ; rdfs:domain space:IdentifierScheme ; rdfs:range xsd:string ;
+  rdfs:label "conformance pattern" ;
+  rdfs:comment "The scheme's own declared regular expression. The pipeline validates against this value rather than against hard-coded logic." .
+space:schemeAuthority a owl:DatatypeProperty ; rdfs:domain space:IdentifierScheme ; rdfs:range xsd:string ;
+  rdfs:label "scheme authority" .

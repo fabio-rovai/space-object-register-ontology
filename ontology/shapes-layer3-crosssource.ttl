@@ -1,0 +1,46 @@
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix space: <https://gov.tesseract.academy/def/space#> .
+
+## One shape per defect class, so the validation report is the findings table.
+
+space:PhantomEntryShape a sh:NodeShape ;
+  sh:targetClass space:PhantomEntry ;
+  sh:severity sh:Violation ;
+  sh:sparql [
+    sh:message "An entry that one catalogue states is not a real object is still carried by another catalogue." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#PhantomEntry> }""" ] .
+
+space:PhantomOnOrbitShape a sh:NodeShape ;
+  sh:targetClass space:PhantomEntryOnOrbit ;
+  sh:severity sh:Violation ;
+  sh:sparql [
+    sh:message "An entry known to correspond to no physical object is carried as an on-orbit object with no decay date." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#PhantomEntryOnOrbit> }""" ] .
+
+space:UndisclosedTrackingLossShape a sh:NodeShape ;
+  sh:targetClass space:UndisclosedTrackingLoss ;
+  sh:severity sh:Violation ;
+  sh:sparql [
+    sh:message "One catalogue records the object as no longer tracked while the other presents it as a normal on-orbit object." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#UndisclosedTrackingLoss> }""" ] .
+
+space:DispositionDisagreementShape a sh:NodeShape ;
+  sh:targetClass space:DispositionDisagreement ;
+  sh:severity sh:Warning ;
+  sh:sparql [
+    sh:message "The two catalogues disagree about whether the object is still in orbit." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#DispositionDisagreement> }""" ] .
+
+space:CoverageGapShape a sh:NodeShape ;
+  sh:targetClass space:CoverageGap ;
+  sh:severity sh:Warning ;
+  sh:sparql [
+    sh:message "Object present in one catalogue and absent from every catalogue of the other source." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#CoverageGap> }""" ] .
+
+space:UnnumberedObjectShape a sh:NodeShape ;
+  sh:targetClass space:UnnumberedObject ;
+  sh:severity sh:Warning ;
+  sh:sparql [
+    sh:message "Object tracked with no identifier assigned in the reference scheme." ;
+    sh:select """SELECT $this WHERE { $this a <https://gov.tesseract.academy/def/space#UnnumberedObject> }""" ] .
