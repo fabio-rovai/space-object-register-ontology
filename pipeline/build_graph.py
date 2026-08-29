@@ -4,13 +4,13 @@ Turtle is written directly as text rather than through an rdflib Graph, because
 at this scale the parse-then-serialise round trip is the slow path. The result
 is parse-verified afterwards.
 """
-import csv, re, json, collections, pathlib, datetime, sys
+import csv, re, json, collections, os, pathlib, datetime, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from reconcile import (load_celestrak, load_gcat, DESTROYED, TRANSITION,
                        INORBIT, LEFT_EARTH, ERROR, LOST, norm_status)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-HARVEST = "2026-08-18"
+HARVEST = os.environ.get("SORO_HARVEST_DATE", "2026-08-18")
 NS = "https://gov.tesseract.academy/def/space#"
 COSPAR = re.compile(r"^\d{4}-\d{3}[A-Z]{1,3}$")
 NORADP = re.compile(r"^[0-9]{1,6}$")
@@ -147,9 +147,6 @@ def main():
     print("wrote", p, f"{p.stat().st_size/1e6:.1f} MB")
     print(json.dumps(counts, indent=1))
 
-if __name__ == "__main__":
-    main()
-
 def emit_defect_subgraph():
     """Write the defect layer on its own, for verification at sane runtime."""
     root = pathlib.Path(__file__).resolve().parent.parent
@@ -159,3 +156,7 @@ def emit_defect_subgraph():
             "UnattributedObject", "UncharacterisedObject")
     out = src[:6] + [l for l in src if any(k in l for k in keep)]
     (root / "reports" / "defects.ttl").write_text("\n".join(out) + "\n")
+
+if __name__ == "__main__":
+    main()
+    emit_defect_subgraph()

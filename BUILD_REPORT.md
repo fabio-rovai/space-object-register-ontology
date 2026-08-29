@@ -301,3 +301,26 @@ undetermined owner and unknown type counts, the Soviet and Russian attribution
 collapse, and the United States against New Zealand launch state difference. Two
 defect classes were added to the ontology to carry them, `space:UnattributedObject`
 and `space:UncharacterisedObject`, each with its own SHACL shape.
+
+## Layer-2 shape correction, 29 August 2026
+
+`space:CosparConformanceShape` applied its COSPAR `sh:pattern` under
+`sh:targetClass space:IdentifierAssertion`, a class that also covers every NORAD
+assertion. Run over the full graph, the shape reported 70,472 violations, one per
+NORAD assertion, and zero on the COSPAR assertions it was written for. The defect
+was latent because the full graph had only ever been checked with pyshacl, which
+needs over an hour at this scale, so the layer-2 shape had only ever run in small
+head-tests. Running the same file through the open-ontologies engine, which
+validates the 2.37 million triple graph in seconds, exposed it immediately.
+
+The fix scopes the pattern check to `scheme:cospar` in a SPARQL constraint.
+Verified three ways: a positive-control graph where a malformed COSPAR value
+fires exactly one violation and a NORAD value fires none, in both pyshacl and
+open-ontologies; the full 29 August graph, which now conforms with zero
+violations across 281,888 focus nodes; and the offline test suite, 14 passing.
+The engine was spec-correct throughout; the shape was wrong.
+
+Two smaller pipeline fixes from the same session: `build_graph.py` now takes the
+harvest date from `SORO_HARVEST_DATE` instead of a hardcoded constant, and
+running it as a script now also emits `reports/defects.ttl`, which previously
+required calling `emit_defect_subgraph()` by hand.
