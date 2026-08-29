@@ -4,6 +4,13 @@ Built 18 August 2026. Every number below is computed twice, once set-based in
 Python from the source files and once by SPARQL over the emitted graph, by
 `pipeline/governance_report.py`, which exits non-zero on any disagreement.
 
+That gate checks implementation, not meaning. It passed on three numbers that
+were wrong, one of them by a factor of 3.6, because both paths shared a single
+misreading of the source vocabulary. Both the failed run and the corrected one
+are kept in [Verification results](#verification-results), and the cause of each
+error is in [Corrections](#corrections-to-the-first-version-of-this-report).
+Read those before quoting any figure from this file.
+
 ## The target changed after source verification
 
 The work began as an ontology for space electronic parts qualification, covering
@@ -53,11 +60,20 @@ pipeline groups every phase of an object before deriving disposition.
 
 **GCAT is not one catalogue.** An early count of objects present in CelesTrak and
 absent from GCAT gave 902 against `satcat` alone. Checking `auxcat` and `ftocat`
-as well recovered 2 of them, so the published figure is 900. The check mattered
+as well recovered 2 of them, so the published figure is 900. *That figure is itself
+superseded: a fourth catalogue, `satcat100k`, was missed and the count is 622.*
+The check mattered
 less than expected here, but publishing 902 without running it would have been
 luck rather than method.
 
 ## Findings
+
+> **Three numbers in this section were superseded on 18 August 2026.**
+> Findings 3, 4 and 5 below are the figures as first published. They are wrong and are
+> kept here on purpose, because the record of what was published matters more than a
+> tidy file. Each is marked inline with its corrected value. The full cause of each
+> error is in [Corrections to the first version of this report](#corrections-to-the-first-version-of-this-report),
+> and the authoritative counts are in `reports/governance.json`.
 
 1. **22 catalogue entries that GCAT states are not real objects are still carried
    by CelesTrak.** GCAT's `ERR` status means "no object corresponding to this
@@ -69,21 +85,30 @@ luck rather than method.
    labels "Delta 150 duplicate", has no decay date in CelesTrak and therefore
    counts as a tracked object still in orbit.
 
-3. **1,104 objects that GCAT records as no longer tracked are presented by
+3. **[SUPERSEDED, the figure is 1,094]** **1,104 objects that GCAT records as no longer tracked are presented by
    CelesTrak as ordinary on-orbit objects.** GCAT's `OX` status means "in orbit
    (probably) but lost: as O, but no recent tracking data". GCAT applies it to
    1,135 objects, and 1,104 of those have no decay date in CelesTrak and no field
-   marking the loss of tracking.
+   marking the loss of tracking. *Ten of the 1,104 do carry a CelesTrak data status
+   code of "No Elements Available" and are therefore disclosed. The figure is 1,094.*
 
-4. **932 objects on which the two catalogues disagree about whether the object is
+4. **[SUPERSEDED, the figure is 261]** **932 objects on which the two catalogues disagree about whether the object is
    still in orbit**, after honest decomposition. The raw disagreement is larger.
    163 objects are recorded as physically gone by GCAT while CelesTrak publishes
    no decay date. 933 carry a CelesTrak decay date while GCAT does not record
    them as gone, and of those, 164 are explained by GCAT recording that the
    object left Earth orbit rather than reentering, which is a different event.
    The unexplained residue in that direction is 769.
+   *Every one of that 769 turned out to have a CelesTrak orbit type of impact or
+   landing against a GCAT docking or attachment event, and 998 objects whose phase
+   ends in a transition were counted as disagreements although GCAT makes no
+   disposition claim for them. The figure is 261. An unexplained residue that is
+   published is a finding that has not been finished.*
 
-5. **900 objects appear in CelesTrak and in none of the three GCAT catalogues.**
+5. **[SUPERSEDED, the figure is 622]** **900 objects appear in CelesTrak and in none
+   of the three GCAT catalogues.** *There are four GCAT catalogues, not three.
+   `satcat100k` was listed on the same index page and was never fetched. It holds 354
+   objects in the 100,000 range and recovers 278 of the 900. The figure is 622.*
 
 6. **605 objects that GCAT tracks have no NORAD number at all**, carried under
    the placeholder `NNA`. They include named payloads such as Mayak and
@@ -144,22 +169,49 @@ recorded as a disagreement, not as an error in one of them.
 
 ## Verification results
 
-The dual-computation gate passes. Every defect count agrees between the
-set-based Python path and the SPARQL path:
+### The first run, and why it is kept here
+
+This is the gate output as first published. It is wrong on three rows and it is
+retained deliberately, because it is the clearest available evidence of what a
+redundant-computation gate does and does not check.
+
+| Defect class | Python | SPARQL | Agree | |
+|---|---|---|---|---|
+| PhantomEntry | 22 | 22 | yes | |
+| PhantomEntryOnOrbit | 1 | 1 | yes | |
+| UndisclosedTrackingLoss | 1,104 | 1,104 | yes | WRONG, 1,094 |
+| DispositionDisagreement | 932 | 932 | yes | WRONG, 261 |
+| CoverageGap | 900 | 900 | yes | WRONG, 622 |
+| UnnumberedObject | 605 | 605 | yes | |
+| IdentifierCollision inside GCAT | 3 | 3 | yes | |
+
+The gate printed `ALL CROSS-CHECKS AGREE` and exited zero. Both paths import the
+same status constants from `pipeline/reconcile.py`, so both encoded the same
+misreading of the GCAT phase vocabulary and failed together. Agreement between
+two implementations of one misunderstanding is not verification. See
+[Corrections to the first version of this report](#corrections-to-the-first-version-of-this-report).
+
+### The current run
+
+Authoritative. Regenerated from the corrected classification over the full graph
+of 2,367,485 triples, and mirrored in `reports/governance.json`.
 
 | Defect class | Python | SPARQL | Agree |
 |---|---|---|---|
 | PhantomEntry | 22 | 22 | yes |
 | PhantomEntryOnOrbit | 1 | 1 | yes |
-| UndisclosedTrackingLoss | 1,104 | 1,104 | yes |
-| DispositionDisagreement | 932 | 932 | yes |
-| CoverageGap | 900 | 900 | yes |
+| UndisclosedTrackingLoss | 1,094 | 1,094 | yes |
+| DispositionDisagreement | 261 | 261 | yes |
+| CoverageGap | 622 | 622 | yes |
 | UnnumberedObject | 605 | 605 | yes |
+| UnattributedObject | 180 | 180 | yes |
+| UncharacterisedObject | 20,198 | 20,198 | yes |
 | IdentifierCollision inside GCAT | 3 | 3 | yes |
 
-`pyshacl` over layer 3 returns 3,564 results, which is the sum of the six
-cross-source defect classes above. The validation report is the findings table,
-which is the property the layering was designed for.
+`pyshacl` over layer 3 returned 3,564 results against the first run, which was
+the sum of its six cross-source defect classes. That sum is a property of the
+layering rather than a check on it: it confirmed the shapes and the counts were
+derived from the same graph, and it moved with the counts when they were wrong.
 
 ## A finding about our own tooling
 
@@ -222,7 +274,10 @@ the landing, and the two records are consistent.
 **Coverage gaps were published as 900. They are 622.** The first version checked
 `auxcat` and `ftocat` and stated that checking mattered. It did not check
 `satcat100k`, which was listed on the same index page, and which contains 354
-objects in the 100,000 range. Adding it recovers 280 of the 900.
+objects in the 100,000 range. Adding it recovers 278 of the 900. (A first statement of
+this correction said 280. That was itself wrong. 900 minus 622 is 278, all 354
+`satcat100k` objects are disjoint from the other three files, and 278 is the exact size
+of the intersection of `satcat100k` with CelesTrak. Verified independently 19 Aug 2026.)
 
 **The lesson worth recording is about the verification, not the arithmetic.** The
 dual-computation gate passed on the wrong number. It compared a Python path and a
