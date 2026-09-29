@@ -1,0 +1,253 @@
+"""Independent verification of the DispositionDisagreement count.
+
+Recomputes DispositionDisagreement from the raw source files without importing
+pipeline/reconcile.py or pipeline/governance_report.py and without reusing
+their constants.
+
+The status-code classification below was derived directly from the GCAT
+documentation (J. C. McDowell, "Phases and Status Values",
+https://planet4589.org/space/gcat/web/intro/phases.html, GCAT release 1.8.8,
+retrieved 29 Sep 2026). It was not copied from reconcile.py.
+
+Metric definition being verified
+--------------------------------
+Scope: objects present in both CelesTrak SATCAT and GCAT satcat, joined on the
+integer NORAD number.
+
+  gcat_gone       = at least one GCAT phase of the object ends in a status
+                    meaning the object was destroyed, reentered, landed or
+                    crashed.
+  celestrak_gone  = the CelesTrak DECAY_DATE field is non-blank.
+
+The object is a disagreement when gcat_gone != celestrak_gone. One exemption
+applies: if CelesTrak records a decay, GCAT has no gone-status phase, and GCAT
+shows that the object left Earth's sphere of influence, the object is not
+counted.
+
+Safety behaviour
+----------------
+Every status value seen in the data must be classified here. An unrecognised
+code aborts the run (exit 3) instead of being silently treated as "not gone".
+
+Usage
+-----
+  python pipeline/verify_disposition.py [--data DIR] [--expect N] [--json]
+
+With --expect N, the script exits 1 if the recomputed count differs from N.
+"""
+import argparse
+import csv
+import json
+import pathlib
+import sys
+
+# ---------------------------------------------------------------------------
+# Status taxonomy, derived independently from the GCAT documentation.
+# Every documented code appears in exactly one class.
+# ---------------------------------------------------------------------------
+
+# Phase ends with the object destroyed, reentered, landed or crashed.
+_ENDED_DESTROYED_OR_DOWN = frozenset({
+    "S",      # targeted suborbital entry/impact, destroyed at t2
+    "R",      # reentered, natural decay
+    "D",      # deorbited, active maneuver
+    "L",      # landed or splashed down on C's surface
+    "LF",     # failed landing, destroyed on impact
+    "F",      # launch failure, crashed or destroyed
+    "AF",     # failed while attached to parent
+    "AS",     # suborbital reentry while attached
+    "AR",     # reentered attached
+    "AR IN",  # reentered inside parent
+    "AL",     # landed attached
+    "AL IN",  # landed inside parent
+    "TX",     # transmission ended while operating on C's surface (already down)
+})
+
+# Phase ends with the object having left Earth's sphere of influence, or
+# operating around or on another world, which implies it previously left Earth.
+_ENDED_BEYOND_EARTH = frozenset({
+    "DSO", "DSA", "DSA IN",  # passed deep-space boundary
+    "EO", "EAO",             # escaped parent SOI
+    "EN",                    # flyby encounter of another body
+    "OI", "OE",              # orbit insertion / escape at another body
+    "LO", "LOA",             # liftoff from a non-Earth world
+})
+
+# Phase ends with the object still in space (free or attached), or at a
+# non-terminal transition such as docking, transfer or renaming.
+_ENDED_STILL_IN_SPACE_OR_TRANSITION = frozenset({
+    "O", "AO", "AO IN", "OX",
+    "UDK", "REL", "DEP", "TO", "TOA",
+    "E",      # exploded; the object continues as a debris fragment
+    "N", "NA", "LEASE",
+    "DK", "GRP", "ATT", "TFR", "TFR E", "TFR IN",
+    "C",      # collided; may or may not survive, so not treated as gone
+    "EVA DP", "EVA RP",
+    "REFLT",
+})
+
+# Entry corresponds to no real object.
+_NO_SUCH_OBJECT = frozenset({"ERR"})
+
+_ALL_KNOWN = (_ENDED_DESTROYED_OR_DOWN | _ENDED_BEYOND_EARTH
+              | _ENDED_STILL_IN_SPACE_OR_TRANSITION | _NO_SUCH_OBJECT)
+
+_classes = [_ENDED_DESTROYED_OR_DOWN, _ENDED_BEYOND_EARTH,
+            _ENDED_STILL_IN_SPACE_OR_TRANSITION, _NO_SUCH_OBJECT]
+assert sum(len(c) for c in _classes) == len(_ALL_KNOWN), \
+    "status taxonomy classes overlap"
+
+
+class UnknownStatusError(RuntimeError):
+    pass
+
+
+def _norm_status(raw):
+    """Collapse internal whitespace so 'AR  IN' and 'AR IN' compare equal."""
+    return " ".join((raw or "").split())
+
+
+def _to_norad(raw):
+    """Parse an identifier as an integer NORAD number, or return None."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        v = int(s)
+    except ValueError:
+        return None
+    return v if v >= 0 else None
+
+
+# ---------------------------------------------------------------------------
+# Loaders. Written independently: stdlib csv with a tab dialect, integer keys.
+# ---------------------------------------------------------------------------
+
+def read_celestrak_decay(path):
+    """Return {norad_int: has_decay_bool} from CelesTrak SATCAT CSV."""
+    csv.field_size_limit(sys.maxsize if sys.maxsize < 2**63 else 2**31 - 1)
+    result = {}
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise RuntimeError(f"{path}: missing expected column ({exc})")
+        for row in reader:
+            if len(row) <= max(i_id, i_dec):
+                continue
+            n = _to_norad(row[i_id])
+            if n is None:
+                continue
+            result[n] = bool(row[i_dec].strip())
+    return result
+
+
+def read_gcat_status_sets(path):
+    """Return ({norad_int: set_of_status}, diagnostics) from a GCAT TSV file."""
+    statuses = {}
+    diag = {"rows": 0, "short_rows_skipped": 0, "no_norad": 0}
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        header = None
+        reader = csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE)
+        for row in reader:
+            if not row:
+                continue
+            if header is None:
+                first = row[0]
+                if first.startswith("#"):
+                    row = [first[1:]] + row[1:]
+                header = [c.strip() for c in row]
+                i_sat = header.index("Satcat")
+                i_st = header.index("Status")
+                width = len(header)
+                continue
+            if row[0].startswith("#"):
+                continue
+            if len(row) < width:
+                diag["short_rows_skipped"] += 1
+                continue
+            diag["rows"] += 1
+            n = _to_norad(row[i_sat])
+            if n is None:
+                diag["no_norad"] += 1
+                continue
+            statuses.setdefault(n, set()).add(_norm_status(row[i_st]))
+    if header is None:
+        raise RuntimeError(f"{path}: empty file")
+    return statuses, diag
+
+
+# ---------------------------------------------------------------------------
+# Computation
+# ---------------------------------------------------------------------------
+
+def compute(data_dir):
+    data_dir = pathlib.Path(data_dir)
+    ct = read_celestrak_decay(data_dir / "celestrak_satcat.csv")
+    gc, diag = read_gcat_status_sets(data_dir / "gcat_satcat.tsv")
+
+    unknown = sorted({s for ss in gc.values() for s in ss} - _ALL_KNOWN)
+    if unknown:
+        raise UnknownStatusError(
+            "GCAT status codes not covered by the documented taxonomy: "
+            + ", ".join(repr(u) for u in unknown))
+
+    flagged = []
+    breakdown = {"gcat_gone_ct_not": 0, "ct_gone_gcat_not": 0,
+                 "exempt_left_earth": 0}
+    for n in sorted(gc.keys() & ct.keys()):
+        ss = gc[n]
+        g_gone = not ss.isdisjoint(_ENDED_DESTROYED_OR_DOWN)
+        c_gone = ct[n]
+        if g_gone == c_gone:
+            continue
+        if c_gone and not g_gone and not ss.isdisjoint(_ENDED_BEYOND_EARTH):
+            breakdown["exempt_left_earth"] += 1
+            continue
+        breakdown["gcat_gone_ct_not" if g_gone else "ct_gone_gcat_not"] += 1
+        flagged.append(n)
+
+    return {
+        "DispositionDisagreement": len(flagged),
+        "breakdown": breakdown,
+        "overlap": len(gc.keys() & ct.keys()),
+        "gcat_diagnostics": diag,
+        "sample": flagged[:20],
+    }
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    default_data = pathlib.Path(__file__).resolve().parent.parent / "data"
+    ap.add_argument("--data", default=str(default_data))
+    ap.add_argument("--expect", type=int, default=None,
+                    help="count from the primary pipeline; mismatch exits 1")
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(argv)
+
+    try:
+        res = compute(args.data)
+    except UnknownStatusError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 3
+
+    if args.json:
+        print(json.dumps(res, indent=2))
+    else:
+        print(f"DispositionDisagreement (independent) = "
+              f"{res['DispositionDisagreement']}")
+        print(f"  breakdown: {res['breakdown']}")
+        print(f"  gcat diagnostics: {res['gcat_diagnostics']}")
+
+    if args.expect is not None and args.expect != res["DispositionDisagreement"]:
+        print(f"MISMATCH: primary={args.expect} "
+              f"independent={res['DispositionDisagreement']}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

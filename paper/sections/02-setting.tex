@@ -1,0 +1,45 @@
+\section{Setting}
+
+\subsection{Two registers of one population}
+
+Artificial objects in Earth orbit are catalogued more than once. We used two
+sources, both openly retrievable without credentials, both retrieved on
+18~August~2026. CelesTrak's satellite catalogue \citep{celestrak2026satcat}
+carried 70,292 objects. The General Catalog of Artificial Space Objects (GCAT)
+\citep{mcdowell2020gcat}, maintained independently and published under CC~BY
+4.0, is split across many files. The pipeline read four of them: a main
+catalogue of 69,999 records covering 69,391 numbered objects, an auxiliary
+catalogue of 11,962 records, a catalogue of 1,802 objects that failed to orbit,
+and a catalogue of 354 numbered objects above 100,000. Two registers describing
+one population is a useful setting because neither has to be treated as ground
+truth: where they disagree, the disagreement itself is the finding.
+
+\subsection{The pipeline and its gate}
+
+The pipeline reconciles objects by catalogue number, emits an RDF graph in which
+every defect is a typed node carrying its evidence, and validates that graph
+against three layers of SHACL shapes \citep{shacl2017}, one shape per defect
+class. On the published run it gated seven defect classes, among them entries
+one register says correspond to no real object while the other still carries
+them, and objects on which the two registers disagree about whether the object
+is still in orbit.
+
+Verification was deliberately over-provisioned. Three independent checks ran on
+every build: a SHACL processor over all three shape layers, a second RDF engine
+written in a different language that loaded and validated the same ontology, and
+a dual-computation gate that recomputed every published count twice. The third
+is the subject of this paper, and its structure is the obvious one:
+
+\begin{quote}\small
+\texttt{python\_side()} reads the source files and returns seven counts.
+\texttt{sparql\_side()} parses the emitted graph and issues one
+\texttt{SELECT (COUNT(DISTINCT ?n))} per defect class. \texttt{main()} compares
+them key by key and calls \texttt{sys.exit(1)} if any pair differs.
+\end{quote}
+
+The diversity is real. One path never constructs a graph and the other never
+sees the source files. One counts Python set members, the other counts distinct
+SPARQL bindings over a materialised graph of 2,330,660 triples, two orders of
+magnitude larger than the input. Parsing that graph takes over an hour and
+roughly 5~GB of memory, so the gate is not run casually, which is part of why its
+verdict carried weight. On the published run it agreed on all seven counts.

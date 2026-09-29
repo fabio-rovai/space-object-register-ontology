@@ -1,0 +1,73 @@
+```python
+"""Dual-computation governance gate.
+
+Every headline number is computed twice: set-based in Python from the source
+files, and via SPARQL over the emitted graph. Any disagreement exits non-zero.
+"""
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+
+def verify_disposition_disagreement():
+    """Independent verification of DispositionDisagreement count.
+    
+    Recomputes using an alternate logic path without pre-computed intermediate sets.
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    count = 0
+    for norad_id in sat:
+        if norad_id not in ct:
+            continue
+        
+        gcat_statuses = {phase.get("Status", "").strip() for phase in sat[norad_id]}
+        gcat_is_gone = bool(gcat_statuses & GONE)
+        gcat_has_left_earth = bool(gcat_statuses & LEFT_EARTH)
+        ct_has_decay = bool(ct[norad_id].get("DECAY_DATE", "").strip())
+        
+        if gcat_is_gone != ct_has_decay:
+            if not (ct_has_decay and gcat_has_left_earth and not gcat_is_gone):
+                count += 1
+    
+    return count
+
+if __name__ == "__main__":
+    original = python_side()
+    verification = verify_disposition_disagreement()
+    
+    if original["DispositionDisagreement"] != verification:
+        print(f"VERIFICATION FAILED: DispositionDisagreement", file=sys.stderr)
+        print(f"  Original: {original['DispositionDisagreement']}", file=sys.stderr)
+        print(f"  Verification: {verification}", file=sys.stderr)
+        sys.exit(1)
+    
+    print(json.dumps(original, indent=2))
+    sys.exit(0)
+```

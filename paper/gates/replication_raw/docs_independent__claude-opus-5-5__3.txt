@@ -1,0 +1,285 @@
+"""Independent second computation of DispositionDisagreement.
+
+Usage:  python pipeline/verify_disposition.py [--json] [--no-compare]
+
+Shares no code with reconcile.py or governance_report.python_side(), so a bug
+in either cannot hide itself:
+
+  * Its own GCAT/CelesTrak parsers (csv module, QUOTE_NONE, BOM/CRLF safe,
+    header located by name, NORAD ids normalised to int on both sides).
+  * Its own status tables, transcribed from GCAT 1.8.8 "Phases and Status
+    Values" (planet4589.org/space/gcat/web/intro/phases.html, retrieved
+    2026-09-29), with a per-status note.
+  * Per-object branch classification rather than one set-comprehension
+    boolean.
+
+Definition reproduced (the same semantics as governance_report):
+  For every NORAD id present in both gcat_satcat.tsv and the CelesTrak SATCAT:
+    G = some GCAT phase of the object ends in a terminal "gone" status
+    C = CelesTrak DECAY_DATE is non-blank
+    X = some phase ends in a "left Earth" status
+    disagreement  <=>  (G and not C)  or  (C and not G and not X)
+
+Only after computing independently does it import governance_report and
+compare. It exits 1 on any mismatch and prints the symmetric difference so
+the divergence can be triaged.
+
+Exit codes: 0 agree, 1 mismatch, 2 input/definition error.
+"""
+import csv
+import json
+import pathlib
+import sys
+import collections
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+
+# --------------------------------------------------------------------------
+# Status tables, transcribed independently from the GCAT documentation.
+# Each value: (category, note). The category drives the computation.
+#   gone     - object no longer exists or is no longer in flight at phase end
+#   departed - object left Earth's sphere of influence or deep-space boundary
+#   other    - still flying, attached, transferred, renamed, error, etc.
+# --------------------------------------------------------------------------
+STATUS_TABLE = {
+    # t2 and Dest both empty
+    "O":      ("other",    "in orbit, free flight"),
+    "AO":     ("other",    "attached in orbit"),
+    "AO IN":  ("other",    "attached inside, in orbit"),
+    "UDK":    ("other",    "undocked"),
+    "REL":    ("other",    "released"),
+    "DEP":    ("other",    "deployed on planetary surface"),
+    "TO":     ("other",    "takeoff from small body"),
+    "TOA":    ("other",    "attached at takeoff (was ALO)"),
+    "ALO":    ("other",    "legacy spelling of TOA"),
+    "OX":     ("other",    "in orbit (probably) but lost"),
+    # Dest blank, t2 set
+    "E":      ("other",    "exploded; continues as debris phase"),
+    "N":      ("other",    "renamed"),
+    "NA":     ("other",    "renamed attached"),
+    "LEASE":  ("other",    "lease period"),
+    # Dest is a location on C / C / blank: end of flight
+    "S":      ("gone",     "targeted suborbital entry/impact"),
+    "R":      ("gone",     "reentered, natural decay"),
+    "D":      ("gone",     "deorbited"),
+    "L":      ("gone",     "landed or splashed down"),
+    "LF":     ("gone",     "failed landing"),
+    "AS":     ("gone",     "suborbital reentered attached"),
+    "AR":     ("gone",     "reentered attached"),
+    "AR IN":  ("gone",     "reentered inside"),
+    "AL":     ("gone",     "landed attached"),
+    "AL IN":  ("gone",     "landed inside"),
+    "TX":     ("gone",     "transmission ended on surface"),
+    "F":      ("gone",     "launch failure"),
+    "AF":     ("gone",     "failed attached"),
+    # Dest is a deep-space JCAT
+    "DSO":    ("departed", "passed deep space boundary"),
+    "DSA":    ("departed", "deep space attached"),
+    "DSA IN": ("departed", "deep space inside"),
+    "LO":     ("departed", "liftoff from non-Earth world, reassigned"),
+    "LOA":    ("departed", "reflight attached from non-Earth world"),
+    # Dest is a main-catalogue JCAT
+    "DK":     ("other",    "docked"),
+    "GRP":    ("other",    "grappled"),
+    "ATT":    ("other",    "attached to new parent"),
+    "TFR":    ("other",    "transfer internal"),
+    "TFR E":  ("other",    "transfer to exterior"),
+    "TFR IN": ("other",    "transfer to interior"),
+    "RET":    ("other",    "same as TFR IN"),
+    "C":      ("other",    "collided; may or may not survive (see doc)"),
+    "EVA DP": ("other",    "spacewalk depress"),
+    "EVA RP": ("other",    "spacewalk repress"),
+    "REFLT":  ("other",    "reassigned to new catalog number"),
+    # Dest is a body name
+    "EO":     ("departed", "escape from SOI"),
+    "EAO":    ("departed", "escape attached"),
+    "EN":     ("departed", "encounter / flyby"),
+    "OI":     ("departed", "orbit insertion around another body"),
+    "OE":     ("departed", "orbit escape from another body"),
+    # Special
+    "ERR":    ("other",    "catalogue/tracking error, no object"),
+}
+
+
+def norm_status(s):
+    return " ".join((s or "").split()).upper()
+
+
+def norm_norad(s):
+    s = (s or "").strip()
+    return str(int(s)) if s.isdigit() else None
+
+
+# --------------------------------------------------------------------------
+# Independent loaders
+# --------------------------------------------------------------------------
+def read_gcat_statuses(path):
+    """Return ({norad: [status, ...]}, diagnostics)."""
+    diag = collections.Counter()
+    by_norad = collections.defaultdict(list)
+    header = None
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        reader = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+        for raw in reader:
+            if not raw or not any(c.strip() for c in raw):
+                continue
+            first = raw[0]
+            if first.startswith("#"):
+                cand = [c.strip() for c in ([first.lstrip("#")] + raw[1:])]
+                if header is None and "Satcat" in cand and "Status" in cand:
+                    header = cand
+                continue
+            if header is None:
+                raise SystemExit(f"{path.name}: data before header")
+            diag["rows"] += 1
+            if len(raw) < len(header):
+                diag["short_rows"] += 1
+                raw = raw + [""] * (len(header) - len(raw))
+            rec = dict(zip(header, (c.strip() for c in raw)))
+            n = norm_norad(rec.get("Satcat"))
+            if n is None:
+                diag["rows_without_norad"] += 1
+                continue
+            st = norm_status(rec.get("Status"))
+            if st not in STATUS_TABLE:
+                diag[f"unknown_status:{st!r}"] += 1
+            by_norad[n].append(st)
+    if header is None:
+        raise SystemExit(f"{path.name}: no header row found")
+    return by_norad, diag
+
+
+def read_celestrak_decay(path):
+    """Return ({norad: decayed_bool}, diagnostics)."""
+    diag = collections.Counter()
+    out = {}
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        reader = csv.DictReader(f)
+        missing = {"NORAD_CAT_ID", "DECAY_DATE"} - set(reader.fieldnames or [])
+        if missing:
+            raise SystemExit(f"{path.name}: missing columns {sorted(missing)}")
+        for rec in reader:
+            diag["rows"] += 1
+            n = norm_norad(rec.get("NORAD_CAT_ID"))
+            if n is None:
+                diag["rows_without_norad"] += 1
+                continue
+            if n in out:
+                diag["duplicate_norad"] += 1
+            out[n] = bool((rec.get("DECAY_DATE") or "").strip())
+    return out, diag
+
+
+# --------------------------------------------------------------------------
+# Independent computation
+# --------------------------------------------------------------------------
+def classify(statuses):
+    cats = {STATUS_TABLE.get(s, ("unknown", ""))[0] for s in statuses}
+    return "gone" in cats, "departed" in cats
+
+
+def disposition_disagreements(gcat, ct_decayed):
+    bad = set()
+    reasons = collections.Counter()
+    for n, statuses in gcat.items():
+        if n not in ct_decayed:
+            continue
+        gone, departed = classify(statuses)
+        decayed = ct_decayed[n]
+        if gone and not decayed:
+            bad.add(n)
+            reasons["gcat_gone_celestrak_not_decayed"] += 1
+        elif decayed and not gone:
+            if departed:
+                reasons["excused_left_earth"] += 1
+            else:
+                bad.add(n)
+                reasons["celestrak_decayed_gcat_not_gone"] += 1
+    return bad, reasons
+
+
+def existing_disagreement_set():
+    """Reproduce the governance_report set, for diffing only."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    return {
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+    }
+
+
+def main(argv):
+    as_json = "--json" in argv
+    compare = "--no-compare" not in argv
+
+    gcat, gdiag = read_gcat_statuses(DATA / "gcat_satcat.tsv")
+    ct, cdiag = read_celestrak_decay(DATA / "celestrak_satcat.csv")
+    mine, reasons = disposition_disagreements(gcat, ct)
+
+    result = {
+        "metric": "DispositionDisagreement",
+        "independent_count": len(mine),
+        "breakdown": dict(reasons),
+        "gcat_diagnostics": dict(gdiag),
+        "celestrak_diagnostics": dict(cdiag),
+    }
+
+    rc = 0
+    if any(k.startswith("unknown_status:") for k in gdiag):
+        result["warning"] = "GCAT contains status values not in STATUS_TABLE"
+        rc = 2
+
+    if compare:
+        try:
+            theirs = existing_disagreement_set()
+        except Exception as e:
+            result["compare_error"] = f"{type(e).__name__}: {e}"
+            rc = max(rc, 2)
+        else:
+            only_mine = sorted(mine - theirs, key=int)
+            only_theirs = sorted(theirs - mine, key=int)
+            result["existing_count"] = len(theirs)
+            result["agree"] = not only_mine and not only_theirs
+            result["only_independent"] = only_mine[:50]
+            result["only_existing"] = only_theirs[:50]
+            result["only_independent_total"] = len(only_mine)
+            result["only_existing_total"] = len(only_theirs)
+            if not result["agree"]:
+                rc = 1
+
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"DispositionDisagreement (independent): {result['independent_count']}")
+        for k, v in sorted(reasons.items()):
+            print(f"  {k}: {v}")
+        for label, d in (("gcat", gdiag), ("celestrak", cdiag)):
+            for k, v in sorted(d.items()):
+                print(f"  [{label}] {k}: {v}")
+        if "warning" in result:
+            print(f"WARNING: {result['warning']}")
+        if "compare_error" in result:
+            print(f"COMPARE ERROR: {result['compare_error']}")
+        if "existing_count" in result:
+            print(f"DispositionDisagreement (existing):    {result['existing_count']}")
+            if result["agree"]:
+                print("MATCH")
+            else:
+                print("MISMATCH")
+                print(f"  only independent ({result['only_independent_total']}): "
+                      f"{result['only_independent']}")
+                print(f"  only existing    ({result['only_existing_total']}): "
+                      f"{result['only_existing']}")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

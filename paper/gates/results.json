@@ -1,0 +1,369 @@
+{
+  "meta": {
+    "repo": ".",
+    "pre_correction_commit": "24d684e",
+    "post_correction_commit": "60d2938",
+    "celestrak_objects": 70292,
+    "gcat_satcat_objects": 69391
+  },
+  "gate1_total_function": {
+    "description": "For each controlled-vocabulary column, enumerate every distinct observed value and check whether the pipeline's classification constants assign it to a named category. Trailing '?' stripped on GCAT Status via norm_status. Gate fails when the unclassified count is > 0.",
+    "checks": [
+      {
+        "column": "GCAT Status",
+        "source": "gcat_satcat.tsv (the column the disposition classifier is applied to)",
+        "recognised_vocabulary_source": "union of the GCAT status category constants in reconcile.py (PRE: GONE|INORBIT|LEFT_EARTH|ERROR|LOST; POST: DESTROYED|TRANSITION|INORBIT|LEFT_EARTH|ERROR|LOST)",
+        "distinct_values_observed": [
+          "AO",
+          "AR",
+          "ATT",
+          "C",
+          "D",
+          "DK",
+          "DSA",
+          "DSO",
+          "E",
+          "ERR",
+          "EVA DP",
+          "GRP",
+          "L",
+          "N",
+          "O",
+          "OX",
+          "R",
+          "REL",
+          "TFR"
+        ],
+        "distinct_value_count": 19,
+        "pre": {
+          "unclassified_values": [
+            "ATT",
+            "C",
+            "DK",
+            "E",
+            "EVA DP",
+            "GRP",
+            "N",
+            "REL",
+            "TFR"
+          ],
+          "unclassified_distinct_count": 9,
+          "data_rows_affected": 1099
+        },
+        "post": {
+          "unclassified_values": [],
+          "unclassified_distinct_count": 0,
+          "data_rows_affected": 0
+        }
+      },
+      {
+        "column": "GCAT Status",
+        "source": "all four ingested GCAT files pooled",
+        "recognised_vocabulary_source": "same status category constants as the gcat_satcat.tsv check above",
+        "distinct_values_observed": [
+          "-",
+          "AF",
+          "AL",
+          "AL IN",
+          "AO",
+          "AO IN",
+          "AR",
+          "AR IN",
+          "AS",
+          "ATT",
+          "C",
+          "D",
+          "DK",
+          "DSA",
+          "DSO",
+          "E",
+          "ERR",
+          "EVA DP",
+          "F",
+          "GRP",
+          "L",
+          "LF",
+          "N",
+          "O",
+          "OX",
+          "R",
+          "REL",
+          "S",
+          "TFR",
+          "TFR IN"
+        ],
+        "distinct_value_count": 30,
+        "pre": {
+          "unclassified_values": [
+            "-",
+            "ATT",
+            "C",
+            "DK",
+            "E",
+            "EVA DP",
+            "GRP",
+            "N",
+            "REL",
+            "TFR",
+            "TFR IN"
+          ],
+          "unclassified_distinct_count": 11,
+          "data_rows_affected": 2842
+        },
+        "post": {
+          "unclassified_values": [
+            "-"
+          ],
+          "unclassified_distinct_count": 1,
+          "data_rows_affected": 57
+        }
+      },
+      {
+        "column": "CelesTrak DATA_STATUS_CODE",
+        "source": "celestrak_satcat.csv",
+        "recognised_vocabulary_source": "pipeline names only the blank state; the empty string is the only recognised category (reconcile/build_graph test blank vs non-blank only)",
+        "distinct_values_observed": [
+          "",
+          "NEA",
+          "NIE"
+        ],
+        "distinct_value_count": 3,
+        "pre": {
+          "unclassified_values": [
+            "NEA",
+            "NIE"
+          ],
+          "unclassified_distinct_count": 2,
+          "data_rows_affected": 1292
+        },
+        "post": {
+          "unclassified_values": [
+            "NEA",
+            "NIE"
+          ],
+          "unclassified_distinct_count": 2,
+          "data_rows_affected": 1292
+        }
+      },
+      {
+        "column": "CelesTrak ORBIT_TYPE",
+        "source": "celestrak_satcat.csv",
+        "recognised_vocabulary_source": "pipeline defines no ORBIT_TYPE category constants; recognised set empty",
+        "distinct_values_observed": [
+          "DOC",
+          "IMP",
+          "LAN",
+          "ORB"
+        ],
+        "distinct_value_count": 4,
+        "pre": {
+          "unclassified_values": [
+            "DOC",
+            "IMP",
+            "LAN",
+            "ORB"
+          ],
+          "unclassified_distinct_count": 4,
+          "data_rows_affected": 70292
+        },
+        "post": {
+          "unclassified_values": [
+            "DOC",
+            "IMP",
+            "LAN",
+            "ORB"
+          ],
+          "unclassified_distinct_count": 4,
+          "data_rows_affected": 70292
+        }
+      },
+      {
+        "column": "CelesTrak OBJECT_TYPE",
+        "source": "celestrak_satcat.csv",
+        "recognised_vocabulary_source": "pipeline references only the UNK sentinel; UNK is the only recognised value",
+        "distinct_values_observed": [
+          "DEB",
+          "PAY",
+          "R/B",
+          "UNK"
+        ],
+        "distinct_value_count": 4,
+        "pre": {
+          "unclassified_values": [
+            "DEB",
+            "PAY",
+            "R/B"
+          ],
+          "unclassified_distinct_count": 3,
+          "data_rows_affected": 70130
+        },
+        "post": {
+          "unclassified_values": [
+            "DEB",
+            "PAY",
+            "R/B"
+          ],
+          "unclassified_distinct_count": 3,
+          "data_rows_affected": 70130
+        }
+      }
+    ]
+  },
+  "gate2_residue_decomposition": {
+    "description": "Reproduce the PRE DispositionDisagreement count, take the objects it flags as disagreements (its residue), and decompose them by (normalised GCAT Status set, CelesTrak ORBIT_TYPE). Tests whether the residue concentrates in a few misclassification-revealing pairs.",
+    "pre_disposition_disagreement": 932,
+    "pre_disposition_disagreement_expected": 932,
+    "pre_reproduces_expected": true,
+    "post_disposition_disagreement": 261,
+    "post_disposition_disagreement_expected": 261,
+    "post_reproduces_expected": true,
+    "pre_group_count": 20,
+    "pre_top15_groups": [
+      {
+        "gcat_status": "DK",
+        "orbit_type": "LAN",
+        "count": 242
+      },
+      {
+        "gcat_status": "DK",
+        "orbit_type": "IMP",
+        "count": 217
+      },
+      {
+        "gcat_status": "R",
+        "orbit_type": "ORB",
+        "count": 145
+      },
+      {
+        "gcat_status": "TFR",
+        "orbit_type": "IMP",
+        "count": 77
+      },
+      {
+        "gcat_status": "E",
+        "orbit_type": "IMP",
+        "count": 48
+      },
+      {
+        "gcat_status": "ATT",
+        "orbit_type": "IMP",
+        "count": 40
+      },
+      {
+        "gcat_status": "GRP",
+        "orbit_type": "IMP",
+        "count": 38
+      },
+      {
+        "gcat_status": "OX",
+        "orbit_type": "IMP",
+        "count": 31
+      },
+      {
+        "gcat_status": "ERR",
+        "orbit_type": "IMP",
+        "count": 21
+      },
+      {
+        "gcat_status": "GRP",
+        "orbit_type": "LAN",
+        "count": 20
+      },
+      {
+        "gcat_status": "D",
+        "orbit_type": "ORB",
+        "count": 14
+      },
+      {
+        "gcat_status": "O",
+        "orbit_type": "IMP",
+        "count": 14
+      },
+      {
+        "gcat_status": "C",
+        "orbit_type": "IMP",
+        "count": 9
+      },
+      {
+        "gcat_status": "AR",
+        "orbit_type": "ORB",
+        "count": 4
+      },
+      {
+        "gcat_status": "R",
+        "orbit_type": "IMP",
+        "count": 4
+      }
+    ],
+    "pre_top5_group_total": 729,
+    "pre_top5_fraction_of_total": 0.7822,
+    "attachment_impact_landing_residue_count": 500,
+    "post_group_count": 7,
+    "post_top15_groups": [
+      {
+        "gcat_status": "R",
+        "orbit_type": "ORB",
+        "count": 154
+      },
+      {
+        "gcat_status": "OX",
+        "orbit_type": "IMP",
+        "count": 31
+      },
+      {
+        "gcat_status": "E",
+        "orbit_type": "ORB",
+        "count": 30
+      },
+      {
+        "gcat_status": "C",
+        "orbit_type": "ORB",
+        "count": 14
+      },
+      {
+        "gcat_status": "D",
+        "orbit_type": "ORB",
+        "count": 14
+      },
+      {
+        "gcat_status": "O",
+        "orbit_type": "IMP",
+        "count": 14
+      },
+      {
+        "gcat_status": "AR",
+        "orbit_type": "ORB",
+        "count": 4
+      }
+    ]
+  },
+  "gate3_source_inventory": {
+    "description": "Compare the GCAT catalogue basenames the source publishes against the files the PRE harvest loaded, then quantify the coverage consequence of the omitted file.",
+    "source_index_basenames": [
+      "satcat",
+      "auxcat",
+      "ftocat",
+      "satcat100k"
+    ],
+    "pre_fetched_basenames": [
+      "satcat",
+      "auxcat",
+      "ftocat"
+    ],
+    "listed_but_not_fetched": [
+      "satcat100k"
+    ],
+    "satcat100k_objects": 354,
+    "satcat100k_objects_expected": 354,
+    "satcat100k_matches_expected": true,
+    "objects_only_in_satcat100k": 354,
+    "pre_coverage_gap": 900,
+    "pre_coverage_gap_expected": 900,
+    "post_coverage_gap": 622,
+    "post_coverage_gap_expected": 622,
+    "recovered_by_satcat100k": 278,
+    "recovered_expected": 280,
+    "recovered_matches_expected": false,
+    "recovered_equals_pre_minus_post": 278
+  }
+}

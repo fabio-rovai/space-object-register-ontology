@@ -1,0 +1,121 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+
+
+def _independent_status_categories():
+    """Re-derive the GONE / LEFT_EARTH status categorisation directly from
+    the GCAT 'Phases and Status Values' specification text, independently
+    of reconcile.py's GONE/LEFT_EARTH constants. This is a deliberately
+    separate transcription so that a typo or drift in reconcile.py's sets
+    does not silently pass the governance gate.
+    """
+    # "Dest is a location on C, or C itself, or blank" block, i.e. terminal
+    # reentry/landing/failure statuses ("object is gone").
+    gone_codes = {
+        "S", "R", "D", "L", "LF", "AS", "AR", "AR IN",
+        "AL", "AL IN", "TX", "F", "AF",
+    }
+    # "Dest is a JCAT from D catalog (deep space)" plus interplanetary
+    # departure/orbit-transfer statuses ("object left Earth", not gone).
+    left_earth_codes = {
+        "DSO", "DSA", "DSA IN", "LO", "LOA",
+        "EO", "EAO", "EN", "OI", "OE",
+    }
+    return gone_codes, left_earth_codes
+
+
+def verify_disposition_disagreement(expected):
+    """Second, independent recomputation of DispositionDisagreement.
+
+    Deliberately diverges from python_side() in method, not just in syntax:
+      - status categories are re-transcribed from the GCAT spec instead of
+        importing GONE/LEFT_EARTH from reconcile.py;
+      - per-object disposition is derived with explicit loops and boolean
+        flags over phases, not set intersection/union algebra;
+      - CelesTrak decay status is read with a direct string test rather
+        than via a precomputed set comprehension.
+
+    If this path's count differs from the primary python_side() count, that
+    indicates either a bug in one of the two implementations or a genuine
+    ambiguity in the source data, and the pipeline must fail loudly.
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    gone_codes, left_earth_codes = _independent_status_categories()
+
+    mismatches = 0
+    for norad in sat:
+        ct_row = ct.get(norad)
+        if ct_row is None:
+            continue
+
+        has_gone = False
+        has_left_earth = False
+        for phase in sat[norad]:
+            code = (phase.get("Status") or "").strip()
+            if code in gone_codes:
+                has_gone = True
+            elif code in left_earth_codes:
+                has_left_earth = True
+
+        decay_date = (ct_row.get("DECAY_DATE") or "").strip()
+        decayed_per_ct = len(decay_date) > 0
+
+        if has_gone == decayed_per_ct:
+            continue  # agreement, nothing to flag
+
+        # Legitimate exception: CelesTrak says decayed, GCAT says the object
+        # actually left Earth orbit (deep space / another body) rather than
+        # having reentered or been destroyed - not a real disagreement.
+        if decayed_per_ct and has_left_earth and not has_gone:
+            continue
+
+        mismatches += 1
+
+    if mismatches != expected:
+        print(
+            "GOVERNANCE FAILURE: DispositionDisagreement cross-check "
+            f"mismatch: primary={expected} independent={mismatches}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return mismatches
+
+
+def run_governance_gate():
+    result = python_side()
+    verify_disposition_disagreement(result["DispositionDisagreement"])
+    return result
+
+
+if __name__ == "__main__":
+    metrics = run_governance_gate()
+    print(json.dumps(metrics, indent=2))

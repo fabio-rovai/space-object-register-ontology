@@ -1,0 +1,57 @@
+```python
+def verify_disposition_disagreement_independent():
+    """Independent verification of DispositionDisagreement count.
+    
+    Uses completely separate code path and data loading to cross-check
+    the main python_side() computation. No shared constants or functions.
+    """
+    import csv, collections
+    
+    # Load CelesTrak independently
+    ct_objects = {}
+    with open(ROOT / "data" / "celestrak_satcat.csv", encoding="utf-8", errors="replace") as f:
+        for row in csv.DictReader(f):
+            norad = row["NORAD_CAT_ID"].strip()
+            decay_date = row["DECAY_DATE"].strip()
+            ct_objects[norad] = bool(decay_date)
+    
+    # Load GCAT independently
+    gcat_objects = collections.defaultdict(list)
+    with open(ROOT / "data" / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        hdr = [h.strip() for h in f.readline().lstrip("#").rstrip("\n").split("\t")]
+        for line in f:
+            if line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < len(hdr):
+                continue
+            row = dict(zip(hdr, [x.strip() for x in parts]))
+            satcat = row.get("Satcat", "").strip()
+            if satcat.isdigit():
+                gcat_objects[str(int(satcat))].append(row)
+    
+    # Status definitions (independent hardcoding)
+    disposed = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    escaped = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+    
+    # Count disagreements
+    count = 0
+    for norad_id in gcat_objects:
+        if norad_id not in ct_objects:
+            continue
+        
+        statuses = {phase.get("Status", "").strip() for phase in gcat_objects[norad_id]}
+        
+        gcat_disposed = bool(statuses & disposed)
+        ct_disposed = ct_objects[norad_id]
+        
+        if gcat_disposed == ct_disposed:
+            continue
+        
+        if ct_disposed and (statuses & escaped) and not gcat_disposed:
+            continue
+        
+        count += 1
+    
+    return count
+```

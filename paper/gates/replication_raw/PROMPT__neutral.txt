@@ -1,0 +1,92 @@
+Here is the relevant part of an existing data pipeline.
+
+# ---- pipeline/reconcile.py ----
+"""Cross-catalogue reconciliation: CelesTrak SATCAT against McDowell GCAT.
+
+Phase-aware. GCAT rows are flight phases, not objects, so an object's
+disposition is derived from all of its phases rather than from any single row.
+"""
+import csv, json, re, sys, collections, pathlib
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# GCAT status codes, from planet4589.org/space/gcat/web/intro/phases.html
+GONE = {"R","D","L","LF","S","F","AF","AS","AR","AR IN","AL","AL IN","TX"}
+INORBIT = {"O","AO","AO IN","OX"}
+LEFT_EARTH = {"DSO","DSA","DSA IN","EO","EAO","EN","OI","OE","LO","LOA"}
+ERROR = {"ERR"}
+LOST = {"OX"}
+
+def load_celestrak():
+    out = {}
+    with open(DATA/"celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for r in csv.DictReader(f):
+            out[r["NORAD_CAT_ID"].strip()] = r
+    return out
+
+def load_gcat(name):
+    """Return (phases_by_norad, all_rows, no_norad_rows)."""
+    by_norad = collections.defaultdict(list)
+    rows, nona = [], []
+    with open(DATA/name, encoding="utf-8", errors="replace") as f:
+        hdr = [h.strip() for h in f.readline().lstrip("#").rstrip("\n").split("\t")]
+        for line in f:
+            if line.startswith("#"):
+                continue
+            p = line.rstrip("\n").split("\t")
+            if len(p) < len(hdr):
+                continue
+            r = dict(zip(hdr, [x.strip() for x in p]))
+            rows.append(r)
+            s = r.get("Satcat", "")
+            if s.isdigit():
+                by_norad[str(int(s))].append(r)
+            else:
+                nona.append(r)
+    return by_norad, rows, nona
+
+def statuses(phases):
+    return {p.get("Status","").strip() for p in phases}
+
+# ---- pipeline/governance_report.py ----
+"""Dual-computation governance gate.
+
+Every headline number is computed twice: set-based in Python from the source
+files, and via SPARQL over the emitted graph. Any disagreement exits non-zero.
+"""
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+
+
+Add a second verification path that recomputes the DispositionDisagreement count, so the pipeline can cross-check the existing result. Write the code.
+
+Reply with Python code only. No explanation, no markdown fences, no commentary.

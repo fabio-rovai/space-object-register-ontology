@@ -1,0 +1,105 @@
+# ---- pipeline/verify_disposition.py ----
+"""Second, independent verification path for DispositionDisagreement.
+
+Reads the source files directly instead of using reconcile.load_celestrak or
+reconcile.load_gcat, classifies each object with an explicit case analysis,
+and compares the result with governance_report.python_side(). Any mismatch
+exits non-zero. The GCAT status-code sets are still imported from reconcile,
+so an error in those definitions would affect both paths equally.
+"""
+import csv
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from reconcile import GONE, LEFT_EARTH
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+
+def _celestrak_decay_flags(path=DATA / "celestrak_satcat.csv"):
+    flags = {}
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        header = [h.strip() for h in header]
+        i_id = header.index("NORAD_CAT_ID")
+        i_decay = header.index("DECAY_DATE")
+        for row in reader:
+            if len(row) <= max(i_id, i_decay):
+                continue
+            key = row[i_id].strip()
+            flags[key] = bool(row[i_decay].strip())
+    return flags
+
+
+def _gcat_status_sets(path=DATA / "gcat_satcat.tsv"):
+    result = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        first = f.readline()
+        header = [h.strip() for h in first.lstrip("#").rstrip("\n").split("\t")]
+        width = len(header)
+        i_sat = header.index("Satcat")
+        i_status = header.index("Status")
+        reader = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+        for row in reader:
+            if not row:
+                continue
+            if row[0].startswith("#"):
+                continue
+            if len(row) < width:
+                continue
+            sat = row[i_sat].strip()
+            if not sat.isdigit():
+                continue
+            key = str(int(sat))
+            status = row[i_status].strip()
+            if key not in result:
+                result[key] = set()
+            result[key].add(status)
+    return result
+
+
+def disposition_disagreement_ids():
+    decayed = _celestrak_decay_flags()
+    gcat = _gcat_status_sets()
+    disagreements = set()
+    for norad, codes in gcat.items():
+        if norad not in decayed:
+            continue
+        gcat_says_gone = any(c in GONE for c in codes)
+        gcat_says_left_earth = any(c in LEFT_EARTH for c in codes)
+        ct_says_decayed = decayed[norad]
+        if gcat_says_gone and not ct_says_decayed:
+            disagreements.add(norad)
+        elif not gcat_says_gone and ct_says_decayed:
+            if gcat_says_left_earth:
+                continue
+            disagreements.add(norad)
+    return disagreements
+
+
+def disposition_disagreement_count():
+    return len(disposition_disagreement_ids())
+
+
+def crosscheck(primary_count=None):
+    if primary_count is None:
+        from governance_report import python_side
+        primary_count = python_side()["DispositionDisagreement"]
+    ids = disposition_disagreement_ids()
+    secondary_count = len(ids)
+    ok = primary_count == secondary_count
+    status = "PASS" if ok else "FAIL"
+    print(f"DispositionDisagreement primary={primary_count} "
+          f"secondary={secondary_count} [{status}]")
+    if not ok:
+        sample = sorted(ids, key=int)[:20]
+        print(f"  secondary sample IDs: {sample}", file=sys.stderr)
+    return ok
+
+
+if __name__ == "__main__":
+    sys.exit(0 if crosscheck() else 1)

@@ -1,0 +1,298 @@
+# ---- pipeline/verify_disposition.py ----
+"""Independent second verification path for the DispositionDisagreement count.
+
+This module recomputes DispositionDisagreement without reusing any code or
+constants from reconcile.py or governance_report.py. Specifically:
+
+  * It has its own CelesTrak and GCAT readers. NORAD IDs are normalised with
+    int() on BOTH sides, so leading zeros can never cause silent non-matches.
+    Rows that the primary loader silently drops, such as short or ragged GCAT
+    rows or duplicate CelesTrak IDs, are counted and reported here instead.
+  * It has its own status vocabulary, transcribed group-by-group from
+    J. C. McDowell, GCAT 'Phases and Status Values', release 1.8.8,
+    https://planet4589.org/space/gcat/web/intro/phases.html (retrieved 2026-09-29).
+  * It uses an explicit per-object truth table instead of the primary path's
+    single boolean expression.
+
+The metric definition is intentionally identical to the primary path, so both
+paths are expected to produce the same count:
+
+  An object is counted if it is present in CelesTrak and in the GCAT satcat, and
+    (a) at least one GCAT phase ends in a terminal status, but CelesTrak shows
+        no DECAY_DATE, or
+    (b) CelesTrak shows a DECAY_DATE, but no GCAT phase ends in a terminal
+        status, unless some GCAT phase shows the object leaving Earth.
+
+The GCAT page says the Status value describes the object "at the end of the
+phase". The metric pools statuses across all of an object's phases. It does not
+use only the final phase. This module reproduces that choice for comparison. It
+also reports, as a diagnostic only, how many objects would change under a
+final-phase-only rule. That diagnostic never affects the gate.
+
+Exit codes:
+  0  both paths agree
+  1  the counts differ
+  2  an input problem was found, such as unknown status codes in strict mode
+"""
+import argparse
+import collections
+import csv
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# ---------------------------------------------------------------------------
+# Status vocabulary, transcribed independently from the GCAT documentation.
+# Each group follows the section headings on the source page.
+# ---------------------------------------------------------------------------
+
+# Section "Cases with t2 and Dest both empty".
+DOC_OPEN_ENDED = frozenset({
+    "O", "AO", "AO IN", "UDK", "REL", "DEP", "TO", "TOA", "OX",
+})
+
+# Section "Dest is always blank but t2 is not".
+DOC_TRANSITION_BLANK_DEST = frozenset({"E", "N", "NA", "LEASE"})
+
+# Section "Dest is a location on C, or C itself, or blank".
+# These are the terminal outcomes: the object ends destroyed, landed, or
+# inactive on a surface.
+DOC_TERMINAL_AT_BODY = frozenset({
+    "S", "R", "D", "L", "LF", "AS", "AR", "AR IN",
+    "AL", "AL IN", "TX", "F", "AF",
+})
+
+# Section "Dest is a JCAT from D catalog (deep space)".
+DOC_DEEP_SPACE = frozenset({"DSO", "DSA", "DSA IN", "LO", "LOA"})
+
+# Section "Dest is a JCAT from the main catalogs".
+DOC_MAIN_CATALOG_HANDOFF = frozenset({
+    "DK", "GRP", "ATT", "TFR", "TFR E", "TFR IN", "C",
+    "EVA DP", "EVA RP", "REFLT",
+})
+
+# Section "Dest is a body name".
+DOC_BODY_TRANSFER = frozenset({"EO", "EAO", "EN", "OI", "OE"})
+
+# Section "Special cases".
+DOC_SPECIAL = frozenset({"ERR"})
+
+DOC_ALL = (DOC_OPEN_ENDED | DOC_TRANSITION_BLANK_DEST | DOC_TERMINAL_AT_BODY
+           | DOC_DEEP_SPACE | DOC_MAIN_CATALOG_HANDOFF | DOC_BODY_TRANSFER
+           | DOC_SPECIAL)
+
+# Metric-level classes, derived only from the transcription above.
+V_TERMINAL = DOC_TERMINAL_AT_BODY
+V_LEFT_EARTH = DOC_DEEP_SPACE | DOC_BODY_TRANSFER
+
+
+# ---------------------------------------------------------------------------
+# Independent readers
+# ---------------------------------------------------------------------------
+
+def _norm_id(raw):
+    """Return a canonical NORAD ID string, or None if the value is not numeric."""
+    s = (raw or "").strip()
+    if not s or not s.isdigit():
+        return None
+    return str(int(s))
+
+
+def read_celestrak(path):
+    """Return ({norad: decayed_bool}, diagnostics)."""
+    csv.field_size_limit(10_000_000)
+    decayed = {}
+    diag = collections.Counter()
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise SystemExit(f"[verify] CelesTrak header missing column: {exc}")
+        for row in reader:
+            if not row:
+                continue
+            if len(row) <= max(i_id, i_dec):
+                diag["celestrak_short_rows"] += 1
+                continue
+            nid = _norm_id(row[i_id])
+            if nid is None:
+                diag["celestrak_non_numeric_id"] += 1
+                continue
+            is_decayed = bool(row[i_dec].strip())
+            if nid in decayed:
+                diag["celestrak_duplicate_id"] += 1
+                if decayed[nid] != is_decayed:
+                    diag["celestrak_duplicate_id_conflicting_decay"] += 1
+            # Keep the last occurrence, matching csv.DictReader-into-dict behaviour.
+            decayed[nid] = is_decayed
+    return decayed, diag
+
+
+def read_gcat_phases(path):
+    """Return ({norad: [(phase_index, status), ...]}, diagnostics).
+
+    Rows shorter than the header are padded rather than dropped, and each one
+    is counted. If this changes the result relative to the primary path, the
+    gate will show it.
+    """
+    phases = collections.defaultdict(list)
+    diag = collections.Counter()
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        header = None
+        for lineno, raw in enumerate(fh):
+            line = raw.rstrip("\r\n")
+            if header is None:
+                header = [h.strip() for h in line.lstrip("#").split("\t")]
+                try:
+                    i_sat = header.index("Satcat")
+                    i_st = header.index("Status")
+                except ValueError as exc:
+                    raise SystemExit(f"[verify] GCAT header in {path.name} missing: {exc}")
+                continue
+            if line.startswith("#") or not line.strip():
+                continue
+            cols = line.split("\t")
+            if len(cols) < len(header):
+                diag["gcat_short_rows_padded"] += 1
+                cols = cols + [""] * (len(header) - len(cols))
+            nid = _norm_id(cols[i_sat])
+            if nid is None:
+                diag["gcat_rows_without_norad"] += 1
+                continue
+            phases[nid].append((lineno, cols[i_st].strip()))
+    return phases, diag
+
+
+# ---------------------------------------------------------------------------
+# Truth-table evaluation
+# ---------------------------------------------------------------------------
+
+def classify(status_set, ct_decayed):
+    """Return a reason string if the object is a disagreement, otherwise None."""
+    terminal = any(s in V_TERMINAL for s in status_set)
+    left = any(s in V_LEFT_EARTH for s in status_set)
+    if terminal and not ct_decayed:
+        return "gcat_terminal__celestrak_not_decayed"
+    if (not terminal) and ct_decayed and (not left):
+        return "celestrak_decayed__gcat_not_terminal"
+    return None
+
+
+def independent_disposition_disagreement(strict=False):
+    ct, ct_diag = read_celestrak(DATA / "celestrak_satcat.csv")
+    gc, gc_diag = read_gcat_phases(DATA / "gcat_satcat.tsv")
+
+    observed = collections.Counter(s for ph in gc.values() for _, s in ph)
+    unknown = {s: c for s, c in observed.items() if s not in DOC_ALL}
+
+    flagged = {}
+    for nid in sorted(set(gc) & set(ct), key=int):
+        reason = classify({s for _, s in gc[nid]}, ct[nid])
+        if reason:
+            flagged[nid] = reason
+
+    # Diagnostic only: count objects whose verdict would change under a
+    # final-phase-only rule.
+    final_phase_delta = 0
+    for nid in set(gc) & set(ct):
+        last_status = max(gc[nid])[1]
+        if (classify({last_status}, ct[nid]) is None) != (nid not in flagged):
+            final_phase_delta += 1
+
+    result = {
+        "DispositionDisagreement": len(flagged),
+        "by_reason": dict(collections.Counter(flagged.values())),
+        "ids": sorted(flagged, key=int),
+        "unknown_statuses": unknown,
+        "diagnostics": {**ct_diag, **gc_diag},
+        "diagnostic_final_phase_rule_delta": final_phase_delta,
+    }
+    if strict and unknown:
+        print(f"[verify] unknown GCAT status codes: {unknown}", file=sys.stderr)
+        result["_input_error"] = True
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Cross-check against the primary path
+# ---------------------------------------------------------------------------
+
+def _primary_ids():
+    """Recompute the primary path's ID set, used only to explain a mismatch."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    return {n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}
+
+
+def _constant_drift():
+    """Compare the primary constants with this module's transcription of the doc."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import reconcile
+    drift = {}
+    for name, mine in (("GONE", V_TERMINAL), ("LEFT_EARTH", V_LEFT_EARTH)):
+        theirs = set(getattr(reconcile, name))
+        if theirs != set(mine):
+            drift[name] = {
+                "only_in_reconcile": sorted(theirs - mine),
+                "only_in_doc_transcription": sorted(mine - theirs),
+            }
+    return drift
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 2 if GCAT contains undocumented status codes")
+    ap.add_argument("--json", type=pathlib.Path,
+                    help="write the full verification record to this path")
+    args = ap.parse_args(argv)
+
+    indep = independent_disposition_disagreement(strict=args.strict)
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+    primary_count = python_side()["DispositionDisagreement"]
+
+    record = {
+        "metric": "DispositionDisagreement",
+        "primary": primary_count,
+        "independent": indep["DispositionDisagreement"],
+        "agree": primary_count == indep["DispositionDisagreement"],
+        "by_reason": indep["by_reason"],
+        "unknown_statuses": indep["unknown_statuses"],
+        "input_diagnostics": indep["diagnostics"],
+        "constant_drift": _constant_drift(),
+        "diagnostic_final_phase_rule_delta": indep["diagnostic_final_phase_rule_delta"],
+    }
+
+    if not record["agree"]:
+        prim = _primary_ids()
+        mine = set(indep["ids"])
+        record["only_primary"] = sorted(prim - mine, key=int)[:200]
+        record["only_independent"] = sorted(mine - prim, key=int)[:200]
+
+    if args.json:
+        full = dict(record, independent_ids=indep["ids"])
+        args.json.write_text(json.dumps(full, indent=2, sort_keys=True))
+
+    print(json.dumps(record, indent=2, sort_keys=True))
+
+    if indep.get("_input_error"):
+        return 2
+    return 0 if record["agree"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

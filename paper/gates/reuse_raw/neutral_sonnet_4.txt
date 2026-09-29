@@ -1,0 +1,45 @@
+```python
+# ---- pipeline/reconcile.py (addition) ----
+
+def classify_disagreement(status_set, has_decay_date):
+    is_gone = bool(status_set & GONE)
+    is_inorbit = bool(status_set & INORBIT)
+    if is_gone and not has_decay_date:
+        return True
+    if is_inorbit and has_decay_date:
+        return True
+    return False
+
+
+# ---- pipeline/governance_report.py (addition) ----
+from reconcile import load_celestrak, load_gcat, statuses, classify_disagreement
+
+def python_side_verify():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+
+    count = 0
+    for norad in ct:
+        if norad not in sat:
+            continue
+        status_set = statuses(sat[norad])
+        has_decay = bool(ct[norad]["DECAY_DATE"].strip())
+        if classify_disagreement(status_set, has_decay):
+            count += 1
+
+    return {"DispositionDisagreement": count}
+
+
+def reconcile_disposition_disagreement():
+    primary = python_side()
+    verify = python_side_verify()
+
+    a = primary["DispositionDisagreement"]
+    b = verify["DispositionDisagreement"]
+
+    return {
+        "primary": a,
+        "verify": b,
+        "match": a == b,
+    }
+```

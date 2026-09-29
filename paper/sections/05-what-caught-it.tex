@@ -1,0 +1,82 @@
+\section{What did catch it}
+\label{sec:caught}
+
+The errors were found on a second pass over the same data, undertaken because
+the results felt thin rather than because anything had flagged them. Three
+checks did the work, and none compares two derivations of a quantity. Each goes
+back to the source's own account of itself.
+
+\paragraph{Read the field documentation, not the data.}
+The vocabulary had been inferred from the values that appeared in the data,
+which is how docking and attachment came to be read as statements about where an
+object is. GCAT publishes a page defining every status value. It says that a
+record represents a phase in an object's flight history and that the status
+names the event that ends the phase. Reading that separated ``the object is
+somewhere'' from ``this record stops here.''
+
+\paragraph{Decompose every unexplained residue.}
+The first write-up reported 769 of its disagreements as unexplained. Stating a
+residue feels like rigour, which is why errors hide there comfortably. Asking what
+the 769 consisted of ended most of the finding: 640 paired a CelesTrak impact or
+landing with a GCAT transition code, 500 of them docking or attachment. Gemini~8
+is the clearest case. GCAT ends the record at docking with the Agena target
+vehicle and CelesTrak records the landing, and both are right about different
+events in one mission.
+
+\paragraph{Ask whether the source already models what you accuse it of omitting.}
+The tracking-loss finding rested on an implicit claim that CelesTrak has no way
+to record lost tracking. Checking that claim directly, rather than the count
+derived from it, found the field in use.
+
+Redundancy asks whether two routes from $A$ to $B$ agree. These three ask
+whether $A$ is what we think it is.
+
+\section{The correction was wrong too}
+\label{sec:second}
+
+The first correction moved \texttt{C} (collided) into the destroyed set, yet
+GCAT's definitions allow an object to survive a collision. Checking that one
+entry against the source found more than the entry itself.
+
+\paragraph{The source's history of an object is in a file we never read.}
+GCAT's definitions say a collision destroys the object ``in which case there is
+no subsequent phase'', while a survivor starts a new phase; and that after
+\texttt{E} (exploded) the ``next phase of this object is a debris fragment.''
+So \texttt{E} marks a boundary, not a fate, and \texttt{C} is a fate only when
+nothing follows it. Whether anything follows cannot be seen in the files the
+pipeline read, because each holds exactly one record per object. GCAT's own
+index says where the rest is: an event catalogue described as holding ``later
+phases in history for objects in primary catalogs'', listed on the same page as
+the four files we fetched, under a different heading.
+
+\paragraph{Checking the correction against those histories.}
+We appended each object's event-catalogue phases to its record, took the latest
+phase as GCAT's current account of the object, resolved docked and attached
+objects through the object they joined, and recomputed the comparison
+(Appendix~\ref{app:history}). Of the 23 objects coded \texttt{C} that both
+catalogues carry, 21 have a later phase; of the 78 coded \texttt{E}, 66 do. The
+count falls from 261 to 220. It loses 42 objects, all 30 explosions and 12 of the
+14 collisions in the 261. For 40 of them GCAT records a later phase that is still
+in orbit, which is where CelesTrak has them; among these are Cosmos~2251 and
+Iridium~33 after their 2009 collision and Fengyun-1C after the 2007
+anti-satellite test. The other two are explosions with no later phase recorded,
+on which GCAT makes no present claim. One object enters, a payload whose later
+phase ends in a deorbit that CelesTrak does not record.
+
+A second reading from the source agrees. GCAT publishes a derived catalogue of
+the most recent phase of every object. Read against it, the count is 219, and 208
+objects are common to both readings. Every one of the 23 differences has a named
+cause: 12 are reentries recorded by one register and not yet by the other in the
+six weeks between retrievals, 3 are GCAT record revisions in that window, and 8
+are deep-space objects the pipeline sets aside by design and the derived
+catalogue follows. Both readings drop all 42 objects. We treat 220 as the
+reference count, with the caveat that its event-catalogue input was retrieved on
+29~September (GCAT's data update of 28~September) rather than 18~August.
+
+\paragraph{What this shows.}
+The first correction was made by reading the documentation, as the paper
+recommends, and it still misread two codes and missed the file that would have
+settled them. It was a new reading of the vocabulary, and the pipeline's gate
+and our three checks both inherited it. None of them
+flagged the 42 objects (Section~\ref{sec:gates}); a later line-by-line reading
+of the source's definitions did.

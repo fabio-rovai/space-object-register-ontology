@@ -1,0 +1,23 @@
+```python
+def verify_disposition_disagreement():
+    """Independent verification of DispositionDisagreement count."""
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    
+    disagreement_count = 0
+    
+    for norad_id in ct:
+        if norad_id not in sat:
+            continue
+        
+        gcat_status = statuses(sat[norad_id])
+        has_decay = bool(ct[norad_id]["DECAY_DATE"].strip())
+        
+        is_gone = bool(gcat_status & GONE)
+        is_inorbit = bool(gcat_status & INORBIT)
+        
+        if (is_gone and not has_decay) or (is_inorbit and has_decay):
+            disagreement_count += 1
+    
+    return disagreement_count
+```

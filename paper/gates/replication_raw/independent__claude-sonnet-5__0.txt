@@ -1,0 +1,92 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+
+def _disposition_disagreement_setwise(ct, sat, ctdec):
+    """Original computation: boolean-algebra over precomputed status sets."""
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    return len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+    })
+
+
+def _disposition_disagreement_rowwise(ct, sat, ctdec):
+    """Independent recomputation.
+
+    Deliberately structured differently from the set-based version:
+    - iterates row-by-row over each object's raw phase list instead of
+      pre-building per-object status sets,
+    - uses explicit boolean accumulation with early flags instead of
+      set-intersection algebra,
+    - uses an if/elif classification instead of a single boolean expression,
+    - iterates over the CelesTrak catalogue (ct) as the driving set rather
+      than the GCAT satcat dict (sat), to avoid sharing iteration order/bugs.
+    """
+    count = 0
+    for n in ct:
+        phases = sat.get(n)
+        if phases is None:
+            continue
+
+        is_gone = False
+        is_left_earth = False
+        for row in phases:
+            status = row.get("Status", "").strip()
+            if not is_gone and status in GONE:
+                is_gone = True
+            if not is_left_earth and status in LEFT_EARTH:
+                is_left_earth = True
+
+        decayed = n in ctdec
+
+        if decayed and is_left_earth and not is_gone:
+            # explicit carve-out: departed Earth orbit counts as accounted
+            # for even though it is not flagged "GONE"
+            continue
+        elif is_gone == decayed:
+            # both sides agree object's disposition; not a disagreement
+            continue
+        else:
+            count += 1
+
+    return count
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+
+    disagreement_primary = _disposition_disagreement_setwise(ct, sat, ctdec)
+    disagreement_secondary = _disposition_disagreement_rowwise(ct, sat, ctdec)
+
+    if disagreement_primary != disagreement_secondary:
+        sys.stderr.write(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement cross-check "
+            "mismatch: set-based=%d row-wise=%d\n"
+            % (disagreement_primary, disagreement_secondary)
+        )
+        sys.exit(1)
+
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disagreement_primary,
+        "DispositionDisagreementVerified": disagreement_secondary,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }

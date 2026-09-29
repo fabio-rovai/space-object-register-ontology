@@ -1,0 +1,66 @@
+```python
+def verify_disposition_disagreement_independently():
+    """Independent cross-verification of DispositionDisagreement.
+    
+    Completely separate implementation with independently defined constants
+    and reimplemented logic. No shared code paths with original computation.
+    """
+    gone_set = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    left_earth_set = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+    
+    celestrak = load_celestrak()
+    gcat_satcat, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    count = 0
+    for norad in gcat_satcat:
+        if norad not in celestrak:
+            continue
+        
+        phases = gcat_satcat[norad]
+        statuses = set()
+        for phase in phases:
+            status = phase.get("Status", "").strip()
+            if status:
+                statuses.add(status)
+        
+        has_gone = bool(statuses & gone_set)
+        has_decay = bool(celestrak[norad]["DECAY_DATE"].strip())
+        
+        if has_gone != has_decay:
+            if has_decay and (statuses & left_earth_set) and not has_gone:
+                continue
+            count += 1
+    
+    return count
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    
+    disposition_count = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+    
+    disposition_independent = verify_disposition_disagreement_independently()
+    if disposition_count != disposition_independent:
+        raise AssertionError(
+            f"DispositionDisagreement mismatch: primary={disposition_count}, independent={disposition_independent}")
+    
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_count,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+```

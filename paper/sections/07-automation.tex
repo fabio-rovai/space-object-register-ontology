@@ -1,0 +1,99 @@
+\section{Asking a model for an independent check}
+\label{sec:automation}
+
+The pipeline was written by people. We tested one part of the question for
+automated authors: asked to add an independent second path for the disposition
+count, does a code-generating model produce one whose meaning comes from
+somewhere other than the path it was shown? Reuse is the expected answer, since
+not duplicating a definition is correct practice by every other standard, and
+generated test oracles are known to encode the behaviour of the code in front of
+them rather than the behaviour intended \citep{konstantinou2024oracles}.
+
+\paragraph{A preliminary run, and what was wrong with it.}
+A preliminary run of 30 trials on 19~August used a coding-agent CLI with the
+aliases \texttt{sonnet} and \texttt{haiku} and labelled outputs by pattern
+matching over the generated source. It had four problems. The aliases were not resolved to model
+identifiers in any record we kept. The CLI's default tools were not disabled, so
+we cannot show that no trial read files. The prompt paraphrased the consumer
+function: it counted only explicit membership of the gone and in-orbit sets,
+where the real code treated every other status as in orbit. On the frozen data
+that paraphrase returns 208, not 932, so the trials never saw the defect they
+were scored against. And the loader bodies were elided, so no trial could see
+GCAT's column names. What survives is narrower than we claimed. None of the 30
+outputs introduced a status code absent from the prompt, and executed on the
+real files, 22 of them return exactly the 208 of the path they were shown,
+including all 19 that ran under the neutral and ``independent'' requests. When
+code sharing was forbidden, three of ten reproduced 208 and seven diverged, none
+by consulting the source: four guessed a column name and return 0, one parses
+differently and returns 189, one crashes, and one reads GCAT's phase end date as
+a decay date and returns 795 (Appendix~\ref{app:experiment}).
+
+\paragraph{A controlled replication.}
+We reran the experiment with the pre-correction code verbatim, loaders
+included, so that the path shown returns the published 932. Each model was
+pinned by identifier and called through the same CLI with tools disabled, a
+one-line system prompt and an empty working directory: \texttt{claude-opus-5-5},
+\texttt{claude-sonnet-5} and \texttt{claude-haiku-4-5-20251001}. Beside the three original requests,
+two new conditions append GCAT's own status definitions verbatim, which is the
+remedy this paper recommends. Outcomes are behavioural. Each generated path is
+executed on a synthetic catalogue in which each pairing of a status code with a
+CelesTrak state holds a distinct power of two of objects, so any count decodes to
+exactly which pairings the path counted, and then on the frozen real files
+(Appendix~\ref{app:experiment}).
+
+\begin{table}[t]
+\centering
+\small
+\caption{Controlled replication. Each cell is the number of generated paths that
+return the published, defective 932 on the frozen data, out of the trials run.
+``+ definitions'' appends GCAT's status definitions verbatim.
+All 72 paths that return 932 count the same status pairings as the path they
+were shown, on the probe or, for one, on the real files.}
+\label{tab:reuse}
+\begin{tabular}{lccc}
+\toprule
+Request & \texttt{opus-5-5} & \texttt{sonnet-5} & \texttt{haiku-4-5} \\
+\midrule
+Neutral                                  & 5/5 & 5/5 & 5/5 \\
+``Independent'' path                     & 5/5 & 5/5 & 5/5 \\
+Sharing forbidden                        & 4/5 & 4/5 & 5/5 \\
+``Independent'' + definitions & 5/5 & 5/5 & 5/5 \\
+Sharing forbidden + definitions & 4/5 & 5/5 & 5/5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:reuse} gives the result. Of 75 trials, 72 return 932. Of the
+other three, one \texttt{claude-sonnet-5} path returns 0 because its
+hand-written file parser fails, and two \texttt{claude-opus-5-5} paths refuse
+to produce a count. Only one of the 75 would have exposed the defect: with code
+sharing forbidden, an Opus path wrote its own completeness check, and on the
+real files it stops and lists the unclassified codes, among them \texttt{E},
+\texttt{C}, \texttt{DK} and \texttt{ATT}. That is the first gate of
+Section~\ref{sec:gates}, produced unprompted, once.
+
+The definitions did not change what was computed. Of the 30 paths written with
+GCAT's definitions in the prompt, 29 return 932, and every one of the 30 counts
+\texttt{E}, \texttt{C}, \texttt{DK}, \texttt{ATT}, \texttt{TFR} and
+\texttt{GRP} exactly as the shown path does wherever the probe can see it. The
+paths read the documentation and kept the comparison. One Opus path annotated
+\texttt{E} as ``exploded; the object continues as a debris fragment'' and
+\texttt{C} as ``collided; may or may not survive, so not treated as gone'',
+both correct, then placed both, with the docking codes, in a class of objects
+``still in space or transition'' and compared that class with CelesTrak's decay
+flag as the defective path does. On the real files its own completeness check
+stops it on the undocumented suffixes \texttt{L?} and \texttt{R?}; on the
+probe, which has none, it counts exactly what the defective path counts. A \texttt{claude-sonnet-5} path's docstring says
+it ``re-derives the GCAT status taxonomy straight from the phase
+documentation''; it returns 932.
+
+\paragraph{What this does and does not establish.}
+On this task, asking for an independent path, forbidding shared code, and
+supplying the source's definitions each produced paths that, where they worked,
+computed what the defective path computes, while looking to a code reviewer like
+separate implementations with new names and comments citing the documentation.
+It does not establish a rate for models in general (Section~\ref{sec:limits}). If a check is
+meant to be independent, independence has to be specified as a property of its
+inputs and verified by what the check computes, not requested; models also
+struggle to correct their own reasoning without external feedback
+\citep{huang2024cannotselfcorrect}.

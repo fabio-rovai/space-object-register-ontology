@@ -1,0 +1,77 @@
+```python
+import csv
+import pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Status categories based on GCAT phases documentation
+TERMINAL_STATUSES = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+ESCAPE_STATUSES = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+
+def compute_independent_disposition_disagreement():
+    # Load CelesTrak satellite catalog
+    celestrak_catalog = {}
+    with open(DATA / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for record in csv.DictReader(f):
+            norad_id = record["NORAD_CAT_ID"].strip()
+            celestrak_catalog[norad_id] = record
+    
+    # Load GCAT satcat
+    gcat_satcat = {}
+    with open(DATA / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        header_line = f.readline().lstrip("#").rstrip("\n")
+        column_headers = [h.strip() for h in header_line.split("\t")]
+        
+        for line in f:
+            if line.startswith("#"):
+                continue
+            values = line.rstrip("\n").split("\t")
+            if len(values) < len(column_headers):
+                continue
+            
+            phase_record = dict(zip(column_headers, [v.strip() for v in values]))
+            satcat_id = phase_record.get("Satcat", "")
+            
+            if satcat_id.isdigit():
+                norad_id = str(int(satcat_id))
+                if norad_id not in gcat_satcat:
+                    gcat_satcat[norad_id] = []
+                gcat_satcat[norad_id].append(phase_record)
+    
+    # Count objects with disposition disagreement
+    disagreement_count = 0
+    
+    for norad_id in gcat_satcat:
+        if norad_id not in celestrak_catalog:
+            continue
+        
+        # Get all statuses for this object across all phases
+        all_statuses = set()
+        for phase in gcat_satcat[norad_id]:
+            status_str = phase.get("Status", "").strip()
+            if status_str:
+                all_statuses.add(status_str)
+        
+        # Determine if object is in terminal status according to GCAT
+        gcat_terminal = bool(all_statuses & TERMINAL_STATUSES)
+        
+        # Determine if object has escaped Earth orbit according to GCAT
+        gcat_escaped = bool(all_statuses & ESCAPE_STATUSES)
+        
+        # Determine if object has decay date according to CelesTrak
+        ct_decay_date = celestrak_catalog[norad_id].get("DECAY_DATE", "").strip()
+        ct_decayed = bool(ct_decay_date)
+        
+        # Check for basic disagreement
+        if gcat_terminal != ct_decayed:
+            # Apply exception: if CelesTrak decayed AND GCAT escaped AND GCAT not terminal
+            if not (ct_decayed and gcat_escaped and not gcat_terminal):
+                disagreement_count += 1
+    
+    return disagreement_count
+
+if __name__ == "__main__":
+    result = compute_independent_disposition_disagreement()
+    print(result)
+```

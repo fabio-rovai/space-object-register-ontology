@@ -1,0 +1,217 @@
+# ---- pipeline/verify_disposition.py ----
+"""
+Independent second-path verifier for the DispositionDisagreement metric.
+
+This module intentionally re-implements file parsing and status
+classification from scratch -- it does not import anything from
+reconcile.py or governance_report.py, and does not reference any of
+their module-level constants, functions, or data structures. The only
+thing it shares with the first implementation is the on-disk file
+format, which is external ground truth, not a code dependency.
+"""
+import pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Phase/status codes that mark a GCAT flight-phase row as "the object no
+# longer exists as a tracked orbiting body" (decayed, deployed-away,
+# fragmented, retired-from-catalog, etc). Compiled independently from
+# the GCAT phase-code table, not copied from any other module.
+_TERMINAL_CODES = frozenset({
+    "R", "D", "L", "LF", "S", "F", "AF", "AS",
+    "AR", "AR IN", "AL", "AL IN", "TX",
+})
+
+# Phase/status codes that mark a row as "object departed Earth orbit
+# under its own trajectory" (escape, lunar/solar/planetary orbit,
+# heliocentric, etc) rather than having decayed.
+_DEPARTED_EARTH_CODES = frozenset({
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+})
+
+
+def _read_tsv_rows(filename):
+    """Manual tab-file reader: returns (columns, list-of-field-lists)."""
+    path = DATA / filename
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        raw_header = fh.readline()
+        raw_header = raw_header.lstrip("#").rstrip("\n")
+        columns = [c.strip() for c in raw_header.split("\t")]
+        body = []
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < len(columns):
+                continue
+            body.append(fields)
+    return columns, body
+
+
+def _column_index(columns, name):
+    for i, c in enumerate(columns):
+        if c == name:
+            return i
+    raise ValueError(f"column {name!r} not found")
+
+
+def _norad_status_map(filename):
+    """norad_id (normalized str) -> set of raw Status tokens across all
+    flight-phase rows for that object."""
+    columns, body = _read_tsv_rows(filename)
+    idx_satcat = _column_index(columns, "Satcat")
+    idx_status = _column_index(columns, "Status")
+
+    result = {}
+    for fields in body:
+        satcat_raw = fields[idx_satcat].strip()
+        if not satcat_raw.isdigit():
+            continue
+        norad_id = str(int(satcat_raw))
+        status_raw = fields[idx_status].strip()
+        result.setdefault(norad_id, set()).add(status_raw)
+    return result
+
+
+def _split_csv_line(line):
+    """Hand-rolled CSV splitter supporting quoted fields (no csv module)."""
+    fields = []
+    cur = []
+    in_quotes = False
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if in_quotes:
+            if ch == '"':
+                if i + 1 < n and line[i + 1] == '"':
+                    cur.append('"')
+                    i += 1
+                else:
+                    in_quotes = False
+            else:
+                cur.append(ch)
+        else:
+            if ch == '"':
+                in_quotes = True
+            elif ch == ",":
+                fields.append("".join(cur))
+                cur = []
+            else:
+                cur.append(ch)
+        i += 1
+    fields.append("".join(cur))
+    return fields
+
+
+def _read_celestrak_decay_flags():
+    """Manual CSV reader (no csv.DictReader) -> norad_id -> bool
+    (True if CelesTrak records a non-empty decay date for that object)."""
+    path = DATA / "celestrak_satcat.csv"
+    flags = {}
+    with path.open(encoding="utf-8", errors="replace", newline="") as fh:
+        header_line = fh.readline().rstrip("\n")
+        columns = header_line.split(",")
+        idx_norad = columns.index("NORAD_CAT_ID")
+        idx_decay = columns.index("DECAY_DATE")
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            fields = _split_csv_line(line)
+            if len(fields) <= max(idx_norad, idx_decay):
+                continue
+            norad_id = fields[idx_norad].strip()
+            if not norad_id:
+                continue
+            flags[norad_id] = bool(fields[idx_decay].strip())
+    return flags
+
+
+def _has_terminal_status(status_tokens):
+    for tok in status_tokens:
+        if tok in _TERMINAL_CODES:
+            return True
+    return False
+
+
+def _has_departed_earth_status(status_tokens):
+    for tok in status_tokens:
+        if tok in _DEPARTED_EARTH_CODES:
+            return True
+    return False
+
+
+def compute_disposition_disagreement():
+    """
+    Independent recomputation of DispositionDisagreement.
+
+    Flags an object when:
+      - CelesTrak has a record for it, AND
+      - GCAT terminal-status presence disagrees with CelesTrak
+        decay-date presence, AND
+      - the disagreement is not explained by the object having departed
+        Earth orbit (escape/heliocentric/etc) without a GCAT terminal
+        code -- that case is a known non-disagreement, not a data bug.
+    """
+    gcat_status = _norad_status_map("gcat_satcat.tsv")
+    ct_decay = _read_celestrak_decay_flags()
+
+    count = 0
+    for norad_id, statuses in gcat_status.items():
+        if norad_id not in ct_decay:
+            continue
+
+        gcat_says_gone = _has_terminal_status(statuses)
+        ct_says_gone = ct_decay[norad_id]
+
+        if gcat_says_gone == ct_says_gone:
+            continue
+
+        departed_earth_exception = (
+            ct_says_gone
+            and _has_departed_earth_status(statuses)
+            and not gcat_says_gone
+        )
+        if departed_earth_exception:
+            continue
+
+        count += 1
+
+    return count
+
+
+if __name__ == "__main__":
+    print(compute_disposition_disagreement())
+
+
+# ---- pipeline/governance_report.py (additions) ----
+import verify_disposition
+
+
+def cross_check_disposition_disagreement(reported_value):
+    """
+    Run the independent verifier and abort the pipeline if it disagrees
+    with the primary set-based computation. This deliberately calls a
+    module that shares no functions or constants with python_side().
+    """
+    independent_value = verify_disposition.compute_disposition_disagreement()
+    if independent_value != reported_value:
+        sys.stderr.write(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement mismatch "
+            f"between primary ({reported_value}) and independent "
+            f"({independent_value}) computations.\n"
+        )
+        sys.exit(1)
+    return independent_value
+
+
+def _run_disposition_cross_check():
+    metrics = python_side()
+    cross_check_disposition_disagreement(metrics["DispositionDisagreement"])
+    return metrics
+
+
+if __name__ == "__main__":
+    _run_disposition_cross_check()

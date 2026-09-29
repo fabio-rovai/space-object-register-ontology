@@ -1,0 +1,154 @@
+"""pipeline/verify_disposition.py
+
+Second, INDEPENDENT verification path for the DispositionDisagreement
+metric produced by governance_report.python_side().
+
+Design constraints honoured here:
+  * No import of reconcile.py or governance_report.py's helpers/constants
+    (load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST are never
+    referenced).
+  * Its own file-parsing code (different structure: csv.reader with
+    explicit column-index lookup for CelesTrak; manual tab-split with
+    its own header handling for GCAT), rather than reusing DictReader-
+    based loaders.
+  * Its own re-derivation, from the GCAT status-code documentation, of
+    which status codes are "terminal at Earth" and which mean "departed
+    the Earth regime", expressed as separate tuples with different names
+    and a different lookup mechanism (membership in a tuple rather than
+    set-intersection against a frozenset attribute of shared rows).
+  * Its own comparison algorithm (explicit per-object loop with early
+    `continue`s) instead of a single set-comprehension formula.
+
+If this module's count disagrees with governance_report's, the pipeline
+must fail loudly rather than silently trusting either number.
+"""
+import csv, pathlib, collections, sys
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Independent re-derivation, from the GCAT status-code table, of which
+# end-of-phase statuses mean "this object's existence ended in some
+# terminal way at or near Earth" (re-entry, failure, landing, or ending
+# while attached to something that itself ended at Earth).
+_TERMINAL_AT_EARTH = (
+    "R", "D", "L", "LF", "S", "F", "AF", "AS",
+    "AR", "AR IN", "AL", "AL IN", "TX",
+)
+
+# Independent re-derivation of statuses meaning the object is known to
+# have left the Earth-orbit regime without a terminal-at-Earth phase
+# (escaped to deep space, entered another body's sphere of influence,
+# landed/lifted off elsewhere, etc.)
+_DEPARTED_EARTH_REGIME = (
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+)
+
+
+def _read_celestrak_decay_flags():
+    """Return {norad_id: has_decay_date_bool}, parsed independently."""
+    flags = {}
+    path = DATA / "celestrak_satcat.csv"
+    with path.open(newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = next(reader)
+        try:
+            id_col = header.index("NORAD_CAT_ID")
+            decay_col = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise RuntimeError(f"unexpected celestrak header: {header}") from exc
+        for row in reader:
+            if len(row) <= max(id_col, decay_col):
+                continue
+            norad = row[id_col].strip()
+            if not norad:
+                continue
+            flags[norad] = bool(row[decay_col].strip())
+    return flags
+
+
+def _read_gcat_statuses(filename):
+    """Return {norad_id: set_of_status_strings}, parsed independently.
+
+    GCAT files are tab-separated with a '#'-prefixed header line and
+    possible '#' comment lines thereafter; short/blank lines are skipped.
+    """
+    statuses = collections.defaultdict(set)
+    path = DATA / filename
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        first_line = fh.readline()
+        columns = [c.strip() for c in first_line.lstrip("#").rstrip("\n").split("\t")]
+        try:
+            satcat_idx = columns.index("Satcat")
+            status_idx = columns.index("Status")
+        except ValueError as exc:
+            raise RuntimeError(f"unexpected gcat header in {filename}: {columns}") from exc
+        width = len(columns)
+        for line in fh:
+            if not line or line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < width:
+                continue
+            sat_id = fields[satcat_idx].strip()
+            status = fields[status_idx].strip()
+            if sat_id.isdigit():
+                statuses[str(int(sat_id))].add(status)
+    return statuses
+
+
+def compute_disposition_disagreement():
+    """Independently recompute the DispositionDisagreement count.
+
+    An object counts as a disagreement when CelesTrak's decayed/not-decayed
+    flag contradicts what GCAT's phase history implies, UNLESS the
+    apparent contradiction is explained by the object having departed the
+    Earth regime (deep space, lunar, etc.) without ever reaching a
+    terminal-at-Earth phase, while CelesTrak nonetheless marks it decayed.
+    """
+    decay_flags = _read_celestrak_decay_flags()
+    gcat_statuses = _read_gcat_statuses("gcat_satcat.tsv")
+
+    mismatches = 0
+    for norad, celestrak_decayed in decay_flags.items():
+        object_statuses = gcat_statuses.get(norad)
+        if object_statuses is None:
+            continue  # object not present in GCAT satcat: out of scope here
+
+        gcat_terminal = any(s in _TERMINAL_AT_EARTH for s in object_statuses)
+        gcat_departed = any(s in _DEPARTED_EARTH_REGIME for s in object_statuses)
+
+        if gcat_terminal == celestrak_decayed:
+            continue  # the two sources agree
+
+        if celestrak_decayed and gcat_departed and not gcat_terminal:
+            continue  # excused: departure-without-terminal-phase case
+
+        mismatches += 1
+
+    return mismatches
+
+
+def cross_check(expected_count, source_label="governance_report.python_side"):
+    """Recompute independently and abort loudly if it disagrees.
+
+    Returns the independently computed count if it matches `expected_count`.
+    """
+    independent_count = compute_disposition_disagreement()
+    if independent_count != expected_count:
+        raise SystemExit(
+            "DispositionDisagreement cross-check FAILED: "
+            f"{source_label} reported {expected_count}, "
+            f"independent verification computed {independent_count}"
+        )
+    return independent_count
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side  # only used here, for the CLI check
+
+    reported = python_side()["DispositionDisagreement"]
+    result = cross_check(reported)
+    print(f"DispositionDisagreement cross-check OK: {result}")

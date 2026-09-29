@@ -1,0 +1,171 @@
+# pipeline/verify_disposition.py
+"""Independent second path for the DispositionDisagreement count.
+
+Recomputes the metric directly from the raw source files. It does not use
+reconcile.load_celestrak, reconcile.load_gcat or the shared status-code sets,
+so a defect in the shared loaders cannot hide in both results.
+
+The status codes are restated here from
+planet4589.org/space/gcat/web/intro/phases.html and checked against the
+imported definitions, so any drift between the two is caught.
+
+The metric is expressed as an explicit truth table instead of the
+set-expression form used in governance_report.python_side:
+
+    GCAT gone | CelesTrak decayed | left Earth | result
+    ----------+-------------------+------------+-------------
+      yes     |       yes         |     *      | agree
+      yes     |       no          |     *      | DISAGREE
+      no      |       no          |     *      | agree
+      no      |       yes         |    yes     | agree (departed, not decayed)
+      no      |       yes         |    no      | DISAGREE
+
+Exits non-zero if this path and the primary path disagree.
+"""
+import csv
+import sys
+import pathlib
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+_GONE_CODES = frozenset(
+    "R D L LF S F AF AS AR AL TX".split() + ["AR IN", "AL IN"]
+)
+_LEFT_EARTH_CODES = frozenset(
+    "DSO DSA EO EAO EN OI OE LO LOA".split() + ["DSA IN"]
+)
+
+
+def _celestrak_decay_flags(path):
+    """Map NORAD id -> True if a decay date is present (last row wins)."""
+    flags = {}
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = next(reader)
+        try:
+            id_col = header.index("NORAD_CAT_ID")
+            decay_col = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise SystemExit(f"verify_disposition: missing CelesTrak column: {exc}")
+        for rec in reader:
+            if len(rec) != len(header):
+                rec = (rec + [""] * len(header))[: len(header)]
+            flags[rec[id_col].strip()] = bool(rec[decay_col].strip())
+    return flags
+
+
+def _gcat_phase_flags(path):
+    """Map normalised NORAD id -> [any_gone_phase, any_left_earth_phase]."""
+    flags = {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        first = fh.readline()
+        cols = [c.strip() for c in first.lstrip("#").rstrip("\n").split("\t")]
+        try:
+            sat_col = cols.index("Satcat")
+            status_col = cols.index("Status")
+        except ValueError as exc:
+            raise SystemExit(f"verify_disposition: missing GCAT column: {exc}")
+        ncols = len(cols)
+        for raw in fh:
+            if raw[:1] == "#":
+                continue
+            fields = raw.rstrip("\n").split("\t")
+            if len(fields) < ncols:
+                continue
+            sat = fields[sat_col].strip()
+            if not sat.isdigit():
+                continue
+            key = str(int(sat))
+            status = fields[status_col].strip()
+            entry = flags.setdefault(key, [False, False])
+            if status in _GONE_CODES:
+                entry[0] = True
+            if status in _LEFT_EARTH_CODES:
+                entry[1] = True
+    return flags
+
+
+def _classify(gone, decayed, left_earth):
+    """Return True when the two catalogues disagree on disposition."""
+    if gone and decayed:
+        return False
+    if gone and not decayed:
+        return True
+    if not gone and not decayed:
+        return False
+    return not left_earth
+
+
+def disposition_disagreement_ids(data_dir=DATA):
+    decay = _celestrak_decay_flags(data_dir / "celestrak_satcat.csv")
+    phases = _gcat_phase_flags(data_dir / "gcat_satcat.tsv")
+    return {
+        norad
+        for norad, (gone, left) in phases.items()
+        if norad in decay and _classify(gone, decay[norad], left)
+    }
+
+
+def check_code_sets():
+    """Confirm the restated status codes match the shared definitions."""
+    from reconcile import GONE, LEFT_EARTH
+    problems = []
+    if set(GONE) != _GONE_CODES:
+        problems.append(
+            f"GONE drift: only-shared={sorted(set(GONE) - _GONE_CODES)} "
+            f"only-local={sorted(_GONE_CODES - set(GONE))}"
+        )
+    if set(LEFT_EARTH) != _LEFT_EARTH_CODES:
+        problems.append(
+            f"LEFT_EARTH drift: only-shared={sorted(set(LEFT_EARTH) - _LEFT_EARTH_CODES)} "
+            f"only-local={sorted(_LEFT_EARTH_CODES - set(LEFT_EARTH))}"
+        )
+    return problems
+
+
+def primary_ids():
+    """Rebuild the primary path's ID set so differences can be itemised."""
+    from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    return {
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+    }
+
+
+def main():
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+
+    failures = check_code_sets()
+
+    secondary = disposition_disagreement_ids()
+    primary_count = python_side()["DispositionDisagreement"]
+
+    if len(secondary) != primary_count:
+        failures.append(
+            f"DispositionDisagreement mismatch: primary={primary_count} "
+            f"secondary={len(secondary)}"
+        )
+        primary = primary_ids()
+        only_primary = sorted(primary - secondary, key=int)
+        only_secondary = sorted(secondary - primary, key=int)
+        failures.append(f"  only in primary   ({len(only_primary)}): {only_primary[:20]}")
+        failures.append(f"  only in secondary ({len(only_secondary)}): {only_secondary[:20]}")
+
+    if failures:
+        for line in failures:
+            print(f"FAIL {line}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"OK   DispositionDisagreement primary={primary_count} secondary={len(secondary)}")
+
+
+if __name__ == "__main__":
+    main()

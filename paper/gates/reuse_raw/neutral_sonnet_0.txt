@@ -1,0 +1,32 @@
+```python
+# ---- pipeline/governance_report.py (addition) ----
+from reconcile import load_celestrak, load_gcat, GONE, INORBIT, LEFT_EARTH, ERROR, LOST
+
+def verify_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    count = 0
+    for norad, ctrow in ct.items():
+        phases = sat.get(norad)
+        if phases is None:
+            continue
+        decayed = bool(ctrow["DECAY_DATE"].strip())
+        has_gone = False
+        has_inorbit = False
+        for p in phases:
+            status = p.get("Status", "").strip()
+            if status in GONE:
+                has_gone = True
+            if status in INORBIT:
+                has_inorbit = True
+        if (has_gone and not decayed) or (has_inorbit and decayed):
+            count += 1
+    return {"DispositionDisagreement": count}
+
+def cross_checked_disposition_disagreement():
+    a = python_side()["DispositionDisagreement"]
+    b = verify_side()["DispositionDisagreement"]
+    if a != b:
+        raise ValueError(f"DispositionDisagreement mismatch: python_side={a} verify_side={b}")
+    return a
+```

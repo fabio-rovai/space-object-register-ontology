@@ -1,0 +1,193 @@
+"""Independent second verification path for the DispositionDisagreement count.
+
+This module does not import from reconcile.py or governance_report.py for its
+computation. It re-parses the source files with its own readers, declares its
+own GCAT status-code table, and evaluates the rule per object as an explicit
+decision table rather than as one set comprehension. The existing result is
+imported only in main(), for comparison.
+
+Rule being verified, for objects present in both CelesTrak and GCAT satcat:
+  gcat_gone   = at least one GCAT phase has a status in the "gone" class
+  ct_decayed  = CelesTrak DECAY_DATE is non-empty
+  left_earth  = at least one GCAT phase has a status in the "left Earth" class
+
+  gcat_gone | ct_decayed | left_earth | result
+  ----------+------------+------------+-------------------------------
+  True      | True       | any        | agree
+  False     | False      | any        | agree
+  True      | False      | any        | DISAGREE
+  False     | True       | True       | agree (departed Earth orbit)
+  False     | True       | False      | DISAGREE
+
+Identifier normalisation: GCAT Satcat values and CelesTrak NORAD_CAT_ID values
+are both converted to canonical integer strings, so "00005" and "5" join. The
+primary path normalises only the GCAT side. If CelesTrak ever emits
+zero-padded IDs, the two paths will diverge, and the gate will report that.
+"""
+import csv
+import sys
+import pathlib
+import argparse
+import collections
+
+csv.field_size_limit(10_000_000)
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Independently declared from planet4589.org/space/gcat/web/intro/phases.html.
+# Each status code maps to exactly one disposition class.
+STATUS_CLASS = {
+    "R": "gone", "D": "gone", "L": "gone", "LF": "gone", "S": "gone",
+    "F": "gone", "AF": "gone", "AS": "gone", "AR": "gone", "AR IN": "gone",
+    "AL": "gone", "AL IN": "gone", "TX": "gone",
+    "O": "orbit", "AO": "orbit", "AO IN": "orbit", "OX": "orbit",
+    "DSO": "left_earth", "DSA": "left_earth", "DSA IN": "left_earth",
+    "EO": "left_earth", "EAO": "left_earth", "EN": "left_earth",
+    "OI": "left_earth", "OE": "left_earth", "LO": "left_earth",
+    "LOA": "left_earth",
+    "ERR": "error",
+}
+
+
+def _canon_id(raw):
+    """Return a canonical integer-string identifier, or None if not numeric."""
+    s = (raw or "").strip()
+    if not s or not all("0" <= c <= "9" for c in s):
+        return None
+    return str(int(s))
+
+
+def read_celestrak_decay(path=None):
+    """Map canonical NORAD id -> True if CelesTrak lists a decay date.
+
+    If an id appears more than once, the last row wins, matching dict
+    overwrite semantics. The duplicates are returned so they can be reported.
+    """
+    path = path or DATA / "celestrak_satcat.csv"
+    decayed, seen, dupes = {}, set(), set()
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = [h.strip() for h in next(reader)]
+        i_id = header.index("NORAD_CAT_ID")
+        i_dec = header.index("DECAY_DATE")
+        for row in reader:
+            if len(row) <= max(i_id, i_dec):
+                continue
+            key = _canon_id(row[i_id])
+            if key is None:
+                continue
+            if key in seen:
+                dupes.add(key)
+            seen.add(key)
+            decayed[key] = bool(row[i_dec].strip())
+    return decayed, dupes
+
+
+def read_gcat_status_classes(path=None):
+    """Map canonical NORAD id -> set of disposition classes over all phases.
+
+    Unknown status codes are collected and returned rather than silently
+    dropped. Short rows are skipped, as in the primary loader.
+    """
+    path = path or DATA / "gcat_satcat.tsv"
+    classes = collections.defaultdict(set)
+    unknown = collections.Counter()
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = iter(f)
+        header = None
+        for line in lines:
+            header = [h.strip() for h in line.rstrip("\n").lstrip("#").split("\t")]
+            break
+        if header is None:
+            raise ValueError(f"empty GCAT file: {path}")
+        i_sat = header.index("Satcat")
+        i_status = header.index("Status")
+        width = len(header)
+        for line in lines:
+            if line[:1] == "#":
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < width:
+                continue
+            key = _canon_id(fields[i_sat])
+            if key is None:
+                continue
+            code = fields[i_status].strip()
+            cls = STATUS_CLASS.get(code)
+            if cls is None:
+                unknown[code] += 1
+                cls = "unknown"
+            classes[key].add(cls)
+    return classes, unknown
+
+
+def classify(gcat_gone, ct_decayed, left_earth):
+    """Apply the decision table from the module docstring."""
+    if gcat_gone and ct_decayed:
+        return "agree_both_gone"
+    if not gcat_gone and not ct_decayed:
+        return "agree_both_present"
+    if gcat_gone and not ct_decayed:
+        return "disagree_gcat_gone_ct_present"
+    if left_earth:
+        return "agree_departed_earth"
+    return "disagree_ct_decayed_gcat_present"
+
+
+def independent_disposition_disagreement():
+    decayed, ct_dupes = read_celestrak_decay()
+    classes, unknown = read_gcat_status_classes()
+
+    buckets = collections.defaultdict(set)
+    for norad, cls in classes.items():
+        if norad not in decayed:
+            continue
+        verdict = classify("gone" in cls, decayed[norad], "left_earth" in cls)
+        buckets[verdict].add(norad)
+
+    disagreeing = (buckets["disagree_gcat_gone_ct_present"]
+                   | buckets["disagree_ct_decayed_gcat_present"])
+    return {
+        "count": len(disagreeing),
+        "ids": disagreeing,
+        "breakdown": {k: len(v) for k, v in sorted(buckets.items())},
+        "celestrak_duplicate_ids": len(ct_dupes),
+        "unknown_status_codes": dict(unknown),
+    }
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="Independent cross-check of DispositionDisagreement.")
+    ap.add_argument("--show-ids", type=int, default=0,
+                    help="print up to N disagreeing NORAD ids")
+    args = ap.parse_args(argv)
+
+    indep = independent_disposition_disagreement()
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+    primary = python_side()["DispositionDisagreement"]
+
+    print(f"DispositionDisagreement  primary={primary}  independent={indep['count']}")
+    for k, v in indep["breakdown"].items():
+        print(f"  {k}: {v}")
+    if indep["celestrak_duplicate_ids"]:
+        print(f"  WARN celestrak duplicate ids: {indep['celestrak_duplicate_ids']}")
+    if indep["unknown_status_codes"]:
+        print(f"  WARN unknown GCAT status codes: {indep['unknown_status_codes']}")
+    if args.show_ids:
+        for n in sorted(indep["ids"], key=int)[:args.show_ids]:
+            print(f"  id {n}")
+
+    if primary != indep["count"]:
+        print("FAIL: independent verification disagrees with primary computation",
+              file=sys.stderr)
+        return 1
+    print("PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

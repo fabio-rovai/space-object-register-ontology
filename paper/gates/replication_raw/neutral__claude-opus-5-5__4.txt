@@ -1,0 +1,158 @@
+"""Independent second computation of DispositionDisagreement.
+
+Deliberately shares no parsing or normalisation code with reconcile.py or
+governance_report.python_side(), so a defect in either path shows up as a
+count mismatch instead of being silently reproduced. Only the GCAT status
+vocabulary is imported, because that is the rule's specification.
+
+Rule (per NORAD number present in both GCAT satcat and CelesTrak):
+    gcat_gone  = any phase status in GONE
+    gcat_left  = any phase status in LEFT_EARTH
+    ct_decayed = CelesTrak DECAY_DATE non-blank
+    disagreement unless:
+        gcat_gone == ct_decayed
+        or (ct_decayed and gcat_left and not gcat_gone)
+"""
+import csv
+import sys
+import pathlib
+import collections
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from reconcile import GONE, LEFT_EARTH
+from governance_report import python_side
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+
+def _norad_key(raw):
+    """Canonical NORAD key: integer string with no leading zeros, or None."""
+    s = (raw or "").strip()
+    if not s.isdigit():
+        return None
+    return str(int(s))
+
+
+def _celestrak_decay_flags(path):
+    """Map NORAD -> decayed flag. Duplicate NORADs are recorded, not overwritten."""
+    flags = {}
+    conflicts = set()
+    unkeyed = 0
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = [h.strip() for h in next(reader)]
+        i_id = header.index("NORAD_CAT_ID")
+        i_decay = header.index("DECAY_DATE")
+        for row in reader:
+            if len(row) <= max(i_id, i_decay):
+                unkeyed += 1
+                continue
+            key = _norad_key(row[i_id])
+            if key is None:
+                unkeyed += 1
+                continue
+            decayed = row[i_decay].strip() != ""
+            if key in flags and flags[key] != decayed:
+                conflicts.add(key)
+            flags[key] = flags.get(key, False) or decayed
+    return flags, {"unkeyed_rows": unkeyed, "conflicting_duplicates": sorted(conflicts, key=int)}
+
+
+def _gcat_status_sets(path):
+    """Map NORAD -> set of phase Status codes, reading the TSV directly."""
+    statuses = collections.defaultdict(set)
+    short_rows = 0
+    unkeyed = 0
+    with open(path, encoding="utf-8", errors="replace") as f:
+        header = None
+        for line in f:
+            line = line.rstrip("\r\n")
+            if header is None:
+                header = [h.strip() for h in line.lstrip("#").split("\t")]
+                i_sat = header.index("Satcat")
+                i_status = header.index("Status")
+                continue
+            if line.startswith("#") or not line.strip():
+                continue
+            fields = line.split("\t")
+            if len(fields) < len(header):
+                short_rows += 1
+                continue
+            key = _norad_key(fields[i_sat])
+            if key is None:
+                unkeyed += 1
+                continue
+            statuses[key].add(fields[i_status].strip())
+    return dict(statuses), {"short_rows_skipped": short_rows, "unkeyed_rows": unkeyed}
+
+
+def _classify(phase_statuses, ct_decayed):
+    gcat_gone = any(s in GONE for s in phase_statuses)
+    gcat_left = any(s in LEFT_EARTH for s in phase_statuses)
+    if gcat_gone and ct_decayed:
+        return False
+    if not gcat_gone and not ct_decayed:
+        return False
+    if ct_decayed and gcat_left and not gcat_gone:
+        return False
+    return True
+
+
+def disposition_disagreement_independent():
+    ct, ct_diag = _celestrak_decay_flags(DATA / "celestrak_satcat.csv")
+    gcat, gcat_diag = _gcat_status_sets(DATA / "gcat_satcat.tsv")
+    hits = set()
+    for norad, phase_statuses in gcat.items():
+        if norad not in ct:
+            continue
+        if _classify(phase_statuses, ct[norad]):
+            hits.add(norad)
+    return hits, {"celestrak": ct_diag, "gcat_satcat": gcat_diag}
+
+
+def _original_ids():
+    """Recompute the original path's ID set (not just its count) for diffing."""
+    from reconcile import load_celestrak, load_gcat
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    return {
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+    }
+
+
+def main():
+    primary_count = python_side()["DispositionDisagreement"]
+    independent_ids, diag = disposition_disagreement_independent()
+    independent_count = len(independent_ids)
+
+    print(f"DispositionDisagreement primary     : {primary_count}")
+    print(f"DispositionDisagreement independent : {independent_count}")
+    print(f"CelesTrak unkeyed rows              : {diag['celestrak']['unkeyed_rows']}")
+    print(f"CelesTrak conflicting duplicate IDs : {len(diag['celestrak']['conflicting_duplicates'])}")
+    print(f"GCAT satcat short rows skipped      : {diag['gcat_satcat']['short_rows_skipped']}")
+    print(f"GCAT satcat unkeyed rows            : {diag['gcat_satcat']['unkeyed_rows']}")
+
+    if primary_count == independent_count:
+        print("OK: counts agree")
+        return 0
+
+    original_ids = _original_ids()
+    only_primary = sorted(original_ids - independent_ids, key=int)
+    only_independent = sorted(independent_ids - original_ids, key=int)
+    print("FAIL: counts disagree", file=sys.stderr)
+    print(f"  only in primary     ({len(only_primary)}): {only_primary[:50]}", file=sys.stderr)
+    print(f"  only in independent ({len(only_independent)}): {only_independent[:50]}", file=sys.stderr)
+    if diag["celestrak"]["conflicting_duplicates"]:
+        print(f"  CelesTrak duplicate IDs with conflicting DECAY_DATE: "
+              f"{diag['celestrak']['conflicting_duplicates'][:50]}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

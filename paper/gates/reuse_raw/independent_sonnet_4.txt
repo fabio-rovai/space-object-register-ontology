@@ -1,0 +1,49 @@
+```python
+# ---- pipeline/verify_disagreement.py ----
+from reconcile import load_celestrak, load_gcat, statuses
+
+_GONE_CODES = frozenset({
+    "R", "D", "L", "LF", "S", "F",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+})
+_INORBIT_CODES = frozenset({"O", "AO", "AO IN", "OX"})
+
+
+def verify_disposition_disagreement():
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+
+    mismatches = 0
+    for norad in ct.keys() & sat.keys():
+        decayed = bool(ct[norad]["DECAY_DATE"].strip())
+        codes = statuses(sat[norad])
+
+        is_gone = False
+        is_inorbit = False
+        for code in codes:
+            if code in _GONE_CODES:
+                is_gone = True
+            if code in _INORBIT_CODES:
+                is_inorbit = True
+
+        if is_gone and not decayed:
+            mismatches += 1
+        elif is_inorbit and decayed:
+            mismatches += 1
+
+    return {"DispositionDisagreement": mismatches}
+
+
+def cross_check():
+    from governance_report import python_side
+
+    primary = python_side()["DispositionDisagreement"]
+    verified = verify_disposition_disagreement()["DispositionDisagreement"]
+
+    if primary != verified:
+        raise ValueError(
+            f"DispositionDisagreement mismatch: primary={primary} verify={verified}"
+        )
+
+    return {"DispositionDisagreement": primary}
+```

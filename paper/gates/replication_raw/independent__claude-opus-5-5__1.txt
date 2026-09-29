@@ -1,0 +1,243 @@
+"""Independent verification of the DispositionDisagreement count.
+
+This module deliberately shares no code with reconcile.py or governance_report.py.
+It re-parses the raw source files with a different parser, keeps its own
+status-code tables, and uses a different formulation of the metric. If a bug
+exists in the primary path, this path should not reproduce it.
+
+Metric definition, restated from governance_report.python_side():
+
+  For each NORAD number present in both CelesTrak SATCAT and GCAT satcat:
+    gcat_gone    = any phase has a status in the "gone" class
+    ct_decayed   = CelesTrak DECAY_DATE is non-empty
+    left_earth   = any phase has a status in the "left Earth orbit" class
+
+    disagreement if (gcat_gone != ct_decayed), except when
+    ct_decayed and left_earth and not gcat_gone.
+
+  This path uses the equivalent decomposition into two disjoint cells:
+    A = gcat_gone and not ct_decayed
+    B = ct_decayed and not gcat_gone and not left_earth
+    DispositionDisagreement = |A| + |B|
+
+Exit codes:
+  0  the counts match
+  1  the counts differ
+  2  a data-integrity problem blocks trustworthy verification
+
+Usage: python pipeline/verify_disposition.py [--no-compare] [--out PATH]
+"""
+import argparse
+import csv
+import json
+import pathlib
+import sys
+from collections import Counter, defaultdict
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Status classes, transcribed independently from
+# planet4589.org/space/gcat/web/intro/phases.html. Keep this table
+# hand-maintained and separate from reconcile.py so the two can be diffed.
+V_GONE = frozenset({
+    "R", "D", "L", "LF", "S", "F", "TX",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN",
+})
+V_LEFT_EARTH = frozenset({
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+})
+# Known codes that are neither gone nor left Earth. They are listed only so
+# that codes seen in the data but absent from every table can be reported.
+V_OTHER_KNOWN = frozenset({"O", "AO", "AO IN", "OX", "ERR"})
+V_ALL_KNOWN = V_GONE | V_LEFT_EARTH | V_OTHER_KNOWN
+
+
+def _norm_id(raw):
+    """Normalise a catalogue number to its canonical integer string, or None."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        v = int(s, 10)
+    except ValueError:
+        return None
+    return str(v) if v >= 0 else None
+
+
+def _norm_status(raw):
+    """Collapse internal whitespace so 'AR  IN' and 'AR IN' compare equal."""
+    return " ".join((raw or "").split())
+
+
+def read_celestrak(path):
+    decayed = {}
+    diag = Counter()
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_decay = header.index("DECAY_DATE")
+        except ValueError as e:
+            raise SystemExit(f"[verify] CelesTrak header missing column: {e}")
+        for row in reader:
+            diag["rows"] += 1
+            if len(row) <= max(i_id, i_decay):
+                diag["short_rows"] += 1
+                continue
+            raw_id = row[i_id]
+            nid = _norm_id(raw_id)
+            if nid is None:
+                diag["bad_id"] += 1
+                continue
+            if nid != raw_id.strip():
+                diag["id_needed_normalisation"] += 1
+            if nid in decayed:
+                diag["duplicate_id"] += 1
+            decayed[nid] = bool(row[i_decay].strip())
+    return decayed, diag
+
+
+def read_gcat_statuses(path):
+    """Return {norad: set(statuses)} built from all phases, plus diagnostics."""
+    by_id = defaultdict(set)
+    diag = Counter()
+    unknown = Counter()
+    header = None
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE)
+        for row in reader:
+            if not row:
+                continue
+            first = row[0]
+            if header is None:
+                if first.startswith("#"):
+                    row = [first.lstrip("#")] + row[1:]
+                header = [c.strip() for c in row]
+                try:
+                    i_sat = header.index("Satcat")
+                    i_st = header.index("Status")
+                except ValueError as e:
+                    raise SystemExit(f"[verify] GCAT header missing column in {path.name}: {e}")
+                continue
+            if first.startswith("#"):
+                continue
+            diag["rows"] += 1
+            if len(row) < len(header):
+                diag["short_rows"] += 1
+            if len(row) <= max(i_sat, i_st):
+                diag["short_rows_unusable"] += 1
+                continue
+            nid = _norm_id(row[i_sat])
+            if nid is None:
+                diag["no_norad"] += 1
+                continue
+            raw_st = row[i_st]
+            st = _norm_status(raw_st)
+            if st != raw_st.strip():
+                diag["status_needed_normalisation"] += 1
+            if st not in V_ALL_KNOWN:
+                unknown[st] += 1
+            by_id[nid].add(st)
+    return by_id, diag, unknown
+
+
+def independent_disposition_disagreement():
+    ct_decayed, ct_diag = read_celestrak(DATA / "celestrak_satcat.csv")
+    gcat, g_diag, unknown = read_gcat_statuses(DATA / "gcat_satcat.tsv")
+
+    cell_a, cell_b, excused = set(), set(), set()
+    for nid, sts in gcat.items():
+        if nid not in ct_decayed:
+            continue
+        gone = not sts.isdisjoint(V_GONE)
+        left = not sts.isdisjoint(V_LEFT_EARTH)
+        dec = ct_decayed[nid]
+        if gone and not dec:
+            cell_a.add(nid)
+        elif dec and not gone:
+            if left:
+                excused.add(nid)
+            else:
+                cell_b.add(nid)
+
+    assert cell_a.isdisjoint(cell_b)
+    return {
+        "count": len(cell_a) + len(cell_b),
+        "gcat_gone_ct_not_decayed": sorted(cell_a, key=int),
+        "ct_decayed_gcat_not_gone": sorted(cell_b, key=int),
+        "excused_left_earth": len(excused),
+        "diagnostics": {
+            "celestrak": dict(ct_diag),
+            "gcat_satcat": dict(g_diag),
+            "unclassified_status_codes": dict(unknown),
+        },
+    }
+
+
+def _integrity_problems(res):
+    probs = []
+    d = res["diagnostics"]
+    if d["unclassified_status_codes"]:
+        probs.append(f"unclassified GCAT status codes: {d['unclassified_status_codes']}")
+    if d["gcat_satcat"].get("short_rows_unusable"):
+        probs.append(f"GCAT rows too short to read Satcat/Status: {d['gcat_satcat']['short_rows_unusable']}")
+    if d["celestrak"].get("duplicate_id"):
+        probs.append(f"duplicate CelesTrak NORAD ids: {d['celestrak']['duplicate_id']}")
+    return probs
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-compare", action="store_true",
+                    help="only compute; skip comparison with governance_report")
+    ap.add_argument("--out", type=pathlib.Path,
+                    default=ROOT / "out" / "verify_disposition.json")
+    args = ap.parse_args(argv)
+
+    res = independent_disposition_disagreement()
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(res, indent=2))
+
+    print(f"[verify] independent DispositionDisagreement = {res['count']} "
+          f"(A={len(res['gcat_gone_ct_not_decayed'])}, "
+          f"B={len(res['ct_decayed_gcat_not_gone'])}, "
+          f"excused={res['excused_left_earth']})")
+    d = res["diagnostics"]
+    if d["gcat_satcat"].get("short_rows"):
+        print(f"[verify] note: {d['gcat_satcat']['short_rows']} GCAT rows have fewer fields "
+              f"than the header; the primary loader drops them, this path keeps them "
+              f"when Satcat/Status are present")
+    if d["celestrak"].get("id_needed_normalisation"):
+        print(f"[verify] note: {d['celestrak']['id_needed_normalisation']} CelesTrak ids were "
+              f"not canonical integers; the primary loader does not normalise them")
+
+    probs = _integrity_problems(res)
+    for p in probs:
+        print(f"[verify] INTEGRITY: {p}", file=sys.stderr)
+
+    if args.no_compare:
+        return 2 if probs else 0
+
+    # The primary result is imported only here, for comparison. It is never
+    # used in the computation above.
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+    primary = python_side()["DispositionDisagreement"]
+    print(f"[verify] primary DispositionDisagreement     = {primary}")
+
+    if primary != res["count"]:
+        print(f"[verify] MISMATCH: primary={primary} independent={res['count']} "
+              f"(delta={res['count'] - primary}); see {args.out}", file=sys.stderr)
+        return 1
+    if probs:
+        print("[verify] counts agree, but integrity issues above make the agreement untrustworthy",
+              file=sys.stderr)
+        return 2
+    print("[verify] OK: counts agree")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

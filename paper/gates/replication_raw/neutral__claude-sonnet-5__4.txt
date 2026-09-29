@@ -1,0 +1,92 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+
+def _classify_disagreement(norad, phase_statuses, in_celestrak, has_decay_date):
+    """Per-object classification used by the independent verification path.
+
+    Mirrors the set-based rule in python_side() but is expressed as an
+    explicit decision procedure over a single object rather than as a
+    set comprehension, so a bug in one form is unlikely to be repeated
+    in the other.
+    """
+    if not in_celestrak:
+        return False
+
+    gone_in_gcat = False
+    for s in phase_statuses:
+        if s in GONE:
+            gone_in_gcat = True
+            break
+
+    if gone_in_gcat != has_decay_date:
+        if has_decay_date:
+            left_earth = any(s in LEFT_EARTH for s in phase_statuses)
+            if left_earth and not gone_in_gcat:
+                return False
+        return True
+
+    return False
+
+
+def disposition_disagreement_v2(sat, ct, ctdec):
+    """Independent recomputation of DispositionDisagreement.
+
+    Walks each GCAT-tracked object individually and applies
+    `_classify_disagreement`, rather than building the boolean set
+    expression used in `python_side`. Returns the count so it can be
+    cross-checked against the primary computation.
+    """
+    count = 0
+    for norad, phases in sat.items():
+        if norad not in ct:
+            continue
+        phase_statuses = {p.get("Status", "").strip() for p in phases}
+        if _classify_disagreement(
+            norad,
+            phase_statuses,
+            in_celestrak=True,
+            has_decay_date=(norad in ctdec),
+        ):
+            count += 1
+    return count
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+
+    disposition_disagreement = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+
+    disposition_disagreement_check = disposition_disagreement_v2(sat, ct, ctdec)
+
+    if disposition_disagreement != disposition_disagreement_check:
+        sys.stderr.write(
+            "DispositionDisagreement cross-check FAILED: "
+            f"primary={disposition_disagreement} verification={disposition_disagreement_check}\n"
+        )
+        sys.exit(1)
+
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_disagreement,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT", "")[:6] for p in sat[n]}) > 1}),
+    }

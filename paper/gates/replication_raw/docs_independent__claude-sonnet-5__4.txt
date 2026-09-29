@@ -1,0 +1,79 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
+def _last_phase_status(phases):
+    """Independent derivation: instead of asking 'did ANY phase ever report
+    a terminal status' (the set-membership approach used elsewhere), walk
+    the phase list in file order (which is chronological per object in the
+    GCAT catalog) and take the status of the LAST recorded phase as the
+    object's current disposition. This is a structurally different way of
+    turning a multi-phase history into a single disposition, so it will not
+    share a bug with the set-based method even if both are wrong for the
+    same reason.
+    """
+    if not phases:
+        return ""
+    return phases[-1].get("Status", "").strip()
+
+
+def disposition_disagreement_independent():
+    """Recompute DispositionDisagreement via last-phase status instead of
+    any-phase set membership, and via explicit boolean logic instead of the
+    single chained expression used in python_side().
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+
+    ctdec = set()
+    for n, row in ct.items():
+        if row.get("DECAY_DATE", "").strip():
+            ctdec.add(n)
+
+    mismatches = 0
+    for n, phases in sat.items():
+        if n not in ct:
+            continue
+
+        last_status = _last_phase_status(phases)
+        celestrak_says_decayed = n in ctdec
+        gcat_says_gone = last_status in GONE
+        gcat_says_left_earth = last_status in LEFT_EARTH
+
+        if celestrak_says_decayed and gcat_says_left_earth and not gcat_says_gone:
+            # Explicitly allowed exception: CelesTrak recorded a decay date
+            # for an object GCAT says merely left Earth orbit (e.g. lunar
+            # or interplanetary trajectory), which is not a real disagreement.
+            continue
+
+        if gcat_says_gone == celestrak_says_decayed:
+            # Both catalogues agree on disposition.
+            continue
+
+        mismatches += 1
+
+    return mismatches
+
+
+def verify_disposition_disagreement(reported_value):
+    independent_value = disposition_disagreement_independent()
+    if independent_value != reported_value:
+        sys.stderr.write(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement mismatch "
+            f"between primary computation ({reported_value}) and independent "
+            f"last-phase recomputation ({independent_value}).\n"
+        )
+        sys.exit(1)
+    return independent_value
+
+
+if __name__ == "__main__":
+    from governance_report import python_side
+
+    report = python_side()
+    verified = verify_disposition_disagreement(report["DispositionDisagreement"])
+    report["DispositionDisagreementVerifiedIndependently"] = verified
+    print(json.dumps(report, indent=2))

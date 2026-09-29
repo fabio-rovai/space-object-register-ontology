@@ -1,0 +1,60 @@
+```python
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def compute_disposition_disagreement_primary(ct, sat, st, ctdec):
+    """Primary computation of DispositionDisagreement (set-based)."""
+    return len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+
+def compute_disposition_disagreement_verify(ct, sat, ctdec):
+    """Verification computation of DispositionDisagreement (iterative)."""
+    count = 0
+    for norad_id in sat:
+        if norad_id not in ct:
+            continue
+        
+        statuses = {phase.get("Status", "").strip() for phase in sat[norad_id]}
+        is_gone_gcat = bool(statuses & GONE)
+        is_gone_ct = norad_id in ctdec
+        
+        if is_gone_gcat != is_gone_ct:
+            if not (is_gone_ct and (statuses & LEFT_EARTH) and not is_gone_gcat):
+                count += 1
+    
+    return count
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    
+    disposition_disagreement = compute_disposition_disagreement_primary(ct, sat, st, ctdec)
+    disposition_disagreement_verify = compute_disposition_disagreement_verify(ct, sat, ctdec)
+    
+    if disposition_disagreement != disposition_disagreement_verify:
+        raise AssertionError(f"DispositionDisagreement verification failed: {disposition_disagreement} != {disposition_disagreement_verify}")
+    
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_disagreement,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+```

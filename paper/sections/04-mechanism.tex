@@ -1,0 +1,71 @@
+\section{Why the gate could not see it}
+\label{sec:mechanism}
+
+\subsection{The diversity was in the wrong place}
+
+The two paths differ in language, data structure and intermediate
+representation. They do not differ in where their meaning comes from. The Python
+path imports its classification constants and file loaders from the
+reconciliation module. The SPARQL path queries a graph built by a script that
+imports the same constants and loaders from the same module. We computed the
+overlap from the source at the published commit: the names each path imports
+from that module are identical, four vocabularies and two loaders
+(Appendix~\ref{app:artifacts}, \texttt{shared\_ancestor\_audit.py}).
+
+\begin{center}\small
+\begin{tabular}{l}
+\texttt{reconcile.py} defines \texttt{GONE}, \texttt{LEFT\_EARTH},
+\texttt{ERROR}, \texttt{LOST}, \texttt{load\_gcat}, \texttt{load\_celestrak} \\
+$\downarrow$ \hfill $\downarrow$ \\
+\texttt{governance\_report.py} $\rightarrow$ Python counts \hfill
+\texttt{build\_graph.py} $\rightarrow$ RDF graph $\rightarrow$ SPARQL counts \\
+\end{tabular}
+\end{center}
+
+The gate diversified the last step of the computation and shared the first.
+Whatever those sets assert about the source vocabulary is asserted identically on
+both sides, so the agreement the gate reports is evidence that two pieces of
+code, given the same premises, drew the same conclusion. In one sentence: the
+gate verified that the Python and SPARQL paths implemented the same
+misunderstanding identically.
+
+\subsection{The defective definition}
+
+The pre-correction disposition rule was one line applied to a set literal. An
+object counted as gone in GCAT if any of its status codes was in
+
+\begin{quote}\small\ttfamily
+GONE = \{"R","D","L","LF","S","F","AF","AS","AR","AR IN","AL","AL IN","TX"\}
+\end{quote}
+
+\noindent and, through \texttt{bool(st \& GONE) != (n in ctdec)}, every other
+object counted as still in orbit. The error lived in that default. Codes the set
+did not name, among them \texttt{E} (exploded), \texttt{C} (collided),
+\texttt{DK} (docked) and \texttt{ATT} (attached), were silently read as ``in
+orbit''. A rule that made a claim only on explicit membership of \texttt{GONE}
+or of the in-orbit set, and made no claim otherwise, returns 208 on the frozen
+data, and all 208 are confirmed by the full-history check of
+Section~\ref{sec:second}. The missing codes mattered far less than the decision
+about what to do with codes nobody had classified.
+
+A smaller defect in the same module shows the pathology from another angle. GCAT
+marks uncertain dates with a trailing question mark, so a status can arrive as
+\texttt{"R?"}. The original code compared raw strings and failed to match it,
+which moved 15 objects in or out of the count. None of these corrections is
+discoverable by comparing outputs. Each is a correction to a reading of the
+source.
+
+\subsection{Relation to multiversion programming}
+
+Independently produced program versions do not fail independently
+\citep{knight1986experimental}, and the accompanying theory located the cause in
+the input rather than the versions: some inputs are hard for everyone, so
+failures correlate however separately the versions were written
+\citep{eckhardt1985theoretical, littlewood1989conceptual}. N-version designs were
+proposed precisely to buy independence through separate development
+\citep{avizienis1985nversion}. Our case differs in one structural respect that
+makes it worse. In multiversion programming the shared artifact is a
+specification, and versions can at least diverge in how they read it. Here the
+shared artifact is an executable set of constants imported by both paths, so
+there is no input on which they could disagree about a status code. The
+correlation is not statistical but total.

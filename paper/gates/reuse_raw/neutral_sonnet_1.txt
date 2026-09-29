@@ -1,0 +1,23 @@
+def python_side_verified():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    st = {n: statuses(v) for n, v in sat.items()}
+    both = set(ct) & set(sat)
+    count = 0
+    for n in both:
+        has_decay = bool(ct[n]["DECAY_DATE"].strip())
+        is_gone = bool(st[n] & GONE)
+        is_inorbit = bool(st[n] & INORBIT)
+        if (is_gone and not has_decay) or (is_inorbit and has_decay):
+            count += 1
+    return {"DispositionDisagreement": count}
+
+def cross_check():
+    a = python_side()
+    b = python_side_verified()
+    if a["DispositionDisagreement"] != b["DispositionDisagreement"]:
+        raise ValueError(
+            f"DispositionDisagreement mismatch: primary={a['DispositionDisagreement']} "
+            f"verified={b['DispositionDisagreement']}"
+        )
+    return a["DispositionDisagreement"]

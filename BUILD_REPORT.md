@@ -5,11 +5,18 @@ Python from the source files and once by SPARQL over the emitted graph, by
 `pipeline/governance_report.py`, which exits non-zero on any disagreement.
 
 That gate checks implementation, not meaning. It passed on three numbers that
-were wrong, one of them by a factor of 3.6, because both paths shared a single
-misreading of the source vocabulary. Both the failed run and the corrected one
+were wrong, one of them by more than a factor of four (932 against 220), because
+both paths shared a single misreading of the source vocabulary. Both the failed run and the corrected one
 are kept in [Verification results](#verification-results), and the cause of each
 error is in [Corrections](#corrections-to-the-first-version-of-this-report).
 Read those before quoting any figure from this file.
+
+**Correction, 29 Sep 2026.** The corrected disposition figure below, 261, was
+itself wrong. Checked against each object's full GCAT phase history, which GCAT
+publishes in an event catalogue (`ecat`) this pipeline does not read, it is
+**220**. See [The first correction was also wrong](#the-first-correction-was-also-wrong).
+The pipeline code and `reports/` still produce 261 until the pipeline reads
+`ecat`; `paper/gates/history_check.py` computes 220.
 
 ## The target changed after source verification
 
@@ -180,7 +187,7 @@ redundant-computation gate does and does not check.
 | PhantomEntry | 22 | 22 | yes | |
 | PhantomEntryOnOrbit | 1 | 1 | yes | |
 | UndisclosedTrackingLoss | 1,104 | 1,104 | yes | WRONG, 1,094 |
-| DispositionDisagreement | 932 | 932 | yes | WRONG, 261 |
+| DispositionDisagreement | 932 | 932 | yes | WRONG, 220 (first corrected to 261, also wrong) |
 | CoverageGap | 900 | 900 | yes | WRONG, 622 |
 | UnnumberedObject | 605 | 605 | yes | |
 | IdentifierCollision inside GCAT | 3 | 3 | yes | |
@@ -193,8 +200,10 @@ two implementations of one misunderstanding is not verification. See
 
 ### The current run
 
-Authoritative. Regenerated from the corrected classification over the full graph
-of 2,367,485 triples, and mirrored in `reports/governance.json`.
+Regenerated from the first corrected classification over the full graph of
+2,367,485 triples, and mirrored in `reports/governance.json`. Authoritative except
+for DispositionDisagreement, which is 220, not 261 (see the correction note at the
+top of this file).
 
 | Defect class | Python | SPARQL | Agree |
 |---|---|---|---|
@@ -257,17 +266,20 @@ found by going back over the source field documentation rather than by any
 failure of the verification, and both are corrected above. The originals and
 their causes are recorded here rather than quietly replaced.
 
-**Disposition disagreement was published as 932. It is 261.** The error was a
+**Disposition disagreement was published as 932. It was first corrected to 261,
+and it is 220** (see the next section for the second step). The error was a
 wrong classification of GCAT status codes. The first version treated only the
 reentry and landing codes as meaning the object was gone, and everything else as
-meaning it was still in orbit. That was wrong twice over. `E` (exploded) and `C`
-(collided) destroy the object and were being counted as still in orbit. More
-seriously, codes such as `DK` (docked), `ATT` (attached), `TFR` (transfer) and
-`GRP` (grappled) end a phase because the object joined another object, so GCAT is
-making no claim at all about current disposition, and 998 such objects were being
-counted as disagreements. Of the 769 residue the first report could not explain,
-every one turned out to have a CelesTrak orbit type of impact or landing, and the
-GCAT status was almost always a docking or attachment event. Gemini 8 is the
+meaning it was still in orbit. Codes such as `DK` (docked), `ATT` (attached),
+`TFR` (transfer) and `GRP` (grappled) end a phase because the object joined
+another object, and 640 objects ending in such codes were being counted as
+disagreements; the first correction removed 998 transition-coded objects from the
+comparison, 640 of which had been disagreements. Of the 769 residue the first
+report could not explain, 640 paired a CelesTrak impact or landing with a GCAT
+transition code, 500 of them docking or attachment. (The first correction also
+moved `E` (exploded) and `C` (collided) into the destroyed set. That was wrong;
+see the next section.) An object-by-object ledger of 932, 261 and 220 is produced
+by `paper/gates/count_ledger.py`. Gemini 8 is the
 clearest case: GCAT ends the phase at docking with the Agena, CelesTrak records
 the landing, and the two records are consistent.
 
@@ -278,6 +290,22 @@ objects in the 100,000 range. Adding it recovers 278 of the 900. (A first statem
 this correction said 280. That was itself wrong. 900 minus 622 is 278, all 354
 `satcat100k` objects are disjoint from the other three files, and 278 is the exact size
 of the intersection of `satcat100k` with CelesTrak. Verified independently 19 Aug 2026.)
+
+### The first correction was also wrong
+
+Added 29 Sep 2026. GCAT's definitions say that after `E` (exploded) the "next phase
+of this object is a debris fragment", and that a collision (`C`) destroys the
+object only if no subsequent phase follows. The four catalogue files this
+pipeline reads hold one record per object; GCAT publishes later phases in its
+event catalogue `ecat`, which the pipeline never fetched. Appending each object's
+`ecat` phases and taking the latest phase (`paper/gates/history_check.py`) gives
+220: 42 of the 261 are artefacts (all 30 explosions and 12 of 14 collisions; 40
+of them continue in orbit in GCAT's own later phase, 2 have no later phase
+recorded), and one object enters. GCAT's derived current-status catalogue gives
+219, with 208 objects in common and every difference assigned a cause
+(`paper/gates/currentcat_crosscheck.py`). The first correction was made by
+reading the documentation and still misread two codes; the gate, and the three
+checks built afterwards, were silent on it.
 
 **The lesson worth recording is about the verification, not the arithmetic.** The
 dual-computation gate passed on the wrong number. It compared a Python path and a

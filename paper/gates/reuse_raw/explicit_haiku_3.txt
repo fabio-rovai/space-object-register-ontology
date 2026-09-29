@@ -1,0 +1,31 @@
+def independent_disposition_check():
+    """Alternative implementation to verify disposition disagreement count."""
+    ct = load_celestrak()
+    gc, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    # Status categories (not imported from constants)
+    end_of_life = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    still_active = {"O", "AO", "AO IN", "OX"}
+    
+    disagreements = 0
+    
+    for sat_id in (set(ct) & set(gc)):
+        # Collect statuses inline without using helper function
+        sats = set()
+        for p in gc[sat_id]:
+            s = p.get("Status", "").strip()
+            if s:
+                sats.add(s)
+        
+        # Check decay date directly
+        decayed = bool(ct[sat_id].get("DECAY_DATE", "").strip())
+        
+        # Check status membership
+        eol = bool(sats & end_of_life)
+        act = bool(sats & still_active)
+        
+        # Count mismatches: eol without decay or active with decay
+        if (eol and not decayed) or (act and decayed):
+            disagreements += 1
+    
+    return {"DispositionDisagreement": disagreements}

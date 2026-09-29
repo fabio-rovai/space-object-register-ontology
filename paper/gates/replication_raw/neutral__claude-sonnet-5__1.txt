@@ -1,0 +1,91 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }, ct, sat, ctdec
+
+
+def disposition_disagreement_verify(ct, sat, ctdec):
+    """Independent recomputation of DispositionDisagreement.
+
+    Deliberately avoids the set-algebra one-liner used in python_side():
+    walks each object's phase rows explicitly, accumulates boolean flags
+    with plain loops, and applies the same disagreement/exception rule
+    through separate control flow so the two implementations do not share
+    a bug-prone code path.
+    """
+    mismatched = set()
+    for norad, phases in sat.items():
+        if norad not in ct:
+            continue
+
+        decayed_on_celestrak = norad in ctdec
+
+        gcat_says_gone = False
+        gcat_says_left_earth = False
+        for phase in phases:
+            status = (phase.get("Status") or "").strip()
+            if status in GONE:
+                gcat_says_gone = True
+            if status in LEFT_EARTH:
+                gcat_says_left_earth = True
+
+        if gcat_says_gone == decayed_on_celestrak:
+            # catalogues agree on whether the object is gone; not a disagreement
+            continue
+
+        # exception: CelesTrak marks it decayed, GCAT only shows it as having
+        # left Earth orbit (not literally "gone" in the destructive sense)
+        is_left_earth_exception = (
+            decayed_on_celestrak and gcat_says_left_earth and not gcat_says_gone
+        )
+        if is_left_earth_exception:
+            continue
+
+        mismatched.add(norad)
+
+    return len(mismatched)
+
+
+def cross_check_disposition_disagreement():
+    metrics, ct, sat, ctdec = python_side()
+    primary = metrics["DispositionDisagreement"]
+    verified = disposition_disagreement_verify(ct, sat, ctdec)
+    if primary != verified:
+        print(
+            f"GOVERNANCE GATE FAILURE: DispositionDisagreement mismatch "
+            f"between primary computation ({primary}) and independent "
+            f"verification ({verified}).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return metrics
+
+
+if __name__ == "__main__":
+    metrics = cross_check_disposition_disagreement()
+    print(json.dumps(metrics, indent=2))

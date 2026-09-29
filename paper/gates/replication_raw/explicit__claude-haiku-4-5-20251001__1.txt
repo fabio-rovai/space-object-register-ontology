@@ -1,0 +1,61 @@
+```python
+def independent_verify_disposition_disagreement():
+    """Independent verification of DispositionDisagreement without reusing reconcile.py code or constants."""
+    import csv
+    
+    # Independently specify the status categories
+    deprecated_orbits = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    deep_space_transfer = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+    
+    # Load CelesTrak independently
+    ct_catalog = {}
+    with open(ROOT / "data" / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for record in csv.DictReader(f):
+            ct_catalog[record["NORAD_CAT_ID"].strip()] = record
+    
+    # Load GCAT independently
+    object_phases = collections.defaultdict(list)
+    with open(ROOT / "data" / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        header_line = f.readline().lstrip("#").rstrip("\n")
+        headers = [h.strip() for h in header_line.split("\t")]
+        for line in f:
+            if line.startswith("#"):
+                continue
+            columns = line.rstrip("\n").split("\t")
+            if len(columns) < len(headers):
+                continue
+            entry = dict(zip(headers, [c.strip() for c in columns]))
+            satcat_code = entry.get("Satcat", "")
+            if satcat_code.isdigit():
+                object_phases[str(int(satcat_code))].append(entry)
+    
+    # Identify which CelesTrak objects have decay dates
+    ct_objects_decayed = {n for n in ct_catalog if ct_catalog[n]["DECAY_DATE"].strip()}
+    
+    # Count disagreements
+    total_disagreements = 0
+    
+    for object_id in object_phases:
+        if object_id not in ct_catalog:
+            continue
+        
+        # Collect all phase statuses for this object
+        phase_statuses = {phase.get("Status", "").strip() for phase in object_phases[object_id]}
+        phase_statuses.discard("")
+        
+        # Evaluate disposition in GCAT
+        gcat_defunct = bool(phase_statuses & deprecated_orbits)
+        # Evaluate disposition in CelesTrak
+        ct_defunct = object_id in ct_objects_decayed
+        
+        # Is there a disagreement on defunct status?
+        if gcat_defunct != ct_defunct:
+            # Check if this is an acceptable exception
+            gcat_has_escape = bool(phase_statuses & deep_space_transfer)
+            is_exception = ct_defunct and gcat_has_escape and not gcat_defunct
+            
+            if not is_exception:
+                total_disagreements += 1
+    
+    return total_disagreements
+```

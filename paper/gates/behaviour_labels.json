@@ -1,0 +1,774 @@
+{
+  "references": {
+    "shown_path_original": {
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "real_data_count": {
+        "python_side": 208
+      }
+    },
+    "pre_correction": {
+      "signature": [
+        0,
+        2,
+        4,
+        6,
+        8,
+        10,
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "in orbit",
+        "C": "in orbit",
+        "DK": "in orbit",
+        "ATT": "in orbit",
+        "TFR": "in orbit",
+        "GRP": "in orbit"
+      },
+      "real_data_count": {
+        "python_side": 932
+      }
+    }
+  },
+  "trials": [
+    {
+      "file": "reuse_raw/explicit_haiku_0.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/explicit_haiku_1.txt",
+      "status": "runs, no decodable count",
+      "detail": [
+        {
+          "fn": "independent_verification",
+          "returned": [
+            0
+          ],
+          "printed": [],
+          "headline": 0
+        }
+      ],
+      "real_data_count": {
+        "independent_verification": 0
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/explicit_haiku_2.txt",
+      "status": "runs, no decodable count",
+      "detail": [
+        {
+          "fn": "verify_disposition_disagreement",
+          "returned": [
+            0
+          ],
+          "printed": [],
+          "headline": 0
+        }
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 0
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/explicit_haiku_3.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "independent_disposition_check"
+      ],
+      "real_data_count": {
+        "independent_disposition_check": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/explicit_haiku_4.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement_independent"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement_independent": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/explicit_sonnet_0.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 189
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/explicit_sonnet_1.txt",
+      "status": "ok",
+      "signature": [
+        1,
+        3,
+        5,
+        7,
+        9,
+        11,
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "gone",
+        "C": "gone",
+        "DK": "gone",
+        "ATT": "gone",
+        "TFR": "gone",
+        "GRP": "gone"
+      },
+      "identical_to_shown_path": false,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 795
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "no vocabulary present"
+    },
+    {
+      "file": "reuse_raw/explicit_sonnet_2.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": "AttributeError: 'NoneType' object has no attribute 'strip'"
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/explicit_sonnet_3.txt",
+      "status": "runs, no decodable count",
+      "detail": [
+        {
+          "fn": "recompute_disposition_disagreement",
+          "returned": [
+            0
+          ],
+          "printed": [],
+          "headline": 0
+        }
+      ],
+      "real_data_count": {
+        "recompute_disposition_disagreement": 0
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/explicit_sonnet_4.txt",
+      "status": "runs, no decodable count",
+      "detail": [
+        {
+          "fn": "verify_disposition_disagreement",
+          "returned": [
+            0
+          ],
+          "printed": [],
+          "headline": 0
+        }
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 0
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/independent_haiku_0.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/independent_haiku_1.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/independent_haiku_2.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/independent_haiku_3.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/independent_haiku_4.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side_verify"
+      ],
+      "real_data_count": {
+        "python_side_verify": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/independent_sonnet_0.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "cross_check",
+        "python_side_independent"
+      ],
+      "real_data_count": {
+        "python_side_independent": 208,
+        "cross_check": null
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "imported from the shared module"
+    },
+    {
+      "file": "reuse_raw/independent_sonnet_1.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side_independent"
+      ],
+      "real_data_count": {
+        "python_side_independent": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "imported from the shared module"
+    },
+    {
+      "file": "reuse_raw/independent_sonnet_2.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "independent_side"
+      ],
+      "real_data_count": {
+        "independent_side": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "imported from the shared module"
+    },
+    {
+      "file": "reuse_raw/independent_sonnet_3.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side",
+        "python_side_independent",
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "python_side": 208,
+        "python_side_independent": 208,
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "imported from the shared module"
+    },
+    {
+      "file": "reuse_raw/independent_sonnet_4.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "copied into a new literal"
+    },
+    {
+      "file": "reuse_raw/neutral_haiku_0.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side"
+      ],
+      "real_data_count": {
+        "python_side": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/neutral_haiku_1.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/neutral_haiku_2.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_disposition_disagreement"
+      ],
+      "real_data_count": {
+        "verify_disposition_disagreement": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/neutral_haiku_3.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side"
+      ],
+      "real_data_count": {
+        "python_side": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/neutral_haiku_4.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side_verified"
+      ],
+      "real_data_count": {
+        "python_side_verified": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/neutral_sonnet_0.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "verify_side"
+      ],
+      "real_data_count": {
+        "verify_side": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "imported from the shared module"
+    },
+    {
+      "file": "reuse_raw/neutral_sonnet_1.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side_verified"
+      ],
+      "real_data_count": {
+        "python_side_verified": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/neutral_sonnet_2.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side_verify"
+      ],
+      "real_data_count": {
+        "python_side_verify": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    },
+    {
+      "file": "reuse_raw/neutral_sonnet_3.txt",
+      "status": "ok",
+      "signature": [
+        12,
+        13
+      ],
+      "per_code": {
+        "E": "excluded",
+        "C": "excluded",
+        "DK": "excluded",
+        "ATT": "excluded",
+        "TFR": "excluded",
+        "GRP": "excluded"
+      },
+      "identical_to_shown_path": true,
+      "source_fns": [
+        "python_side_verify"
+      ],
+      "real_data_count": {
+        "python_side_verify": 208
+      },
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "imported from the shared module"
+    },
+    {
+      "file": "reuse_raw/neutral_sonnet_4.txt",
+      "status": "does not run",
+      "detail": "ImportError: cannot import name 'classify_disagreement' from 'reconcile' (/var/folders/6_/xyrdjc_55595gmh482yt84w80000gn/T/tmp_dls_k6z/reconcile.py)",
+      "regex_inherits_defect": true,
+      "regex_vocabulary_source": "referenced bare, assumed in scope"
+    }
+  ],
+  "summary": {
+    "reuse_raw|explicit :: differs": 1,
+    "reuse_raw|explicit :: identical to shown path": 5,
+    "reuse_raw|explicit :: runs, no decodable count": 4,
+    "reuse_raw|independent :: identical to shown path": 10,
+    "reuse_raw|neutral :: does not run": 1,
+    "reuse_raw|neutral :: identical to shown path": 9
+  }
+}

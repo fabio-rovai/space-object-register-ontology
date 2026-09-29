@@ -1,0 +1,78 @@
+def independent_disposition_check():
+    """Independent verification of DispositionDisagreement count."""
+    import csv, collections
+    
+    celestrak_dict = {}
+    with open(ROOT / "data" / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            norad_id = row["NORAD_CAT_ID"].strip()
+            is_decayed = bool(row["DECAY_DATE"].strip())
+            celestrak_dict[norad_id] = is_decayed
+    
+    gcat_dict = collections.defaultdict(list)
+    with open(ROOT / "data" / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        first_line = f.readline()
+        header = [h.strip() for h in first_line.lstrip("#").rstrip("\n").split("\t")]
+        for line in f:
+            if line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < len(header):
+                continue
+            row_data = dict(zip(header, [p.strip() for p in parts]))
+            satcat_str = row_data.get("Satcat", "")
+            if satcat_str.isdigit():
+                norad_id = str(int(satcat_str))
+                gcat_dict[norad_id].append(row_data)
+    
+    terminal_statuses = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    deep_space_statuses = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+    
+    disagreement_count = 0
+    for norad_id in gcat_dict:
+        if norad_id not in celestrak_dict:
+            continue
+        
+        statuses = {phase.get("Status", "").strip() for phase in gcat_dict[norad_id]}
+        
+        celestrak_terminated = celestrak_dict[norad_id]
+        gcat_terminal = bool(statuses & terminal_statuses)
+        gcat_deep = bool(statuses & deep_space_statuses)
+        
+        if gcat_terminal != celestrak_terminated:
+            if not (celestrak_terminated and gcat_deep and not gcat_terminal):
+                disagreement_count += 1
+    
+    return disagreement_count
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    
+    disposition_disagreement = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+    
+    independent_result = independent_disposition_check()
+    if disposition_disagreement != independent_result:
+        print(f"VERIFICATION FAILED: DispositionDisagreement {disposition_disagreement} != {independent_result}", file=sys.stderr)
+        sys.exit(1)
+    
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_disagreement,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }

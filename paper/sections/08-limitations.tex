@@ -1,0 +1,32 @@
+\section{Limitations}
+\label{sec:limits}
+
+This is one incident in one pipeline, with one family of defects. We can show
+that a redundancy gate failed this way here and name the structure that made it
+fail, which is two paths importing one set of definitions, but we make no claim
+about how often that structure occurs or how often it fails elsewhere. A rate
+would need a corpus of pipelines with known ground truth, which is the scarce
+thing. The same bound applies to the three gates. They are measured on one
+codebase against two errors, and the second error, found after the gates existed and not by
+them, is a single prospective test, not an evaluation.
+
+The reference count is not an oracle. Neither register is treated as ground
+truth, and 220 is the number of objects on which the two make incompatible
+claims when GCAT is read through its own phase histories. Those histories come
+from an event catalogue retrieved six weeks after the other files, filtered to
+phases that began before the freeze; corrections GCAT made to older phases in
+that window cannot be separated out. A second reading from GCAT's derived
+catalogue gives 219 and agrees on 208 objects, with every difference assigned a
+cause, and 8 of the differences are deep-space objects the comparison excludes
+by design. Two explosions with no recorded later phase are set aside; counting
+them as destroyed, as the first correction did, gives 222. The first correction
+was presented as final, and a further pass could revise 220 as well.
+
+The generation experiment is small: one task, three models from one family, five
+trials per cell. A second family was planned and dropped, so nothing here speaks
+to models outside it. No trial could retrieve anything: the definitions were
+supplied in the prompt, and the event catalogue that settles \texttt{E} and
+\texttt{C} was supplied to none, so the experiment does not test an agent that
+can fetch the source for itself. We add one further limit: we are the party that benefits from the results being
+true, which is a reason to weight the released prompts, raw outputs and
+behavioural probe over our description of them.

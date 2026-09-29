@@ -1,0 +1,53 @@
+```python
+def verify_disposition_disagreement():
+    """Independent verification path for DispositionDisagreement count."""
+    import csv
+    import json
+    
+    # Load Celestrak data directly
+    celestrak_data = {}
+    with open("data/celestrak_satcat.csv") as f:
+        for row in csv.DictReader(f):
+            norad_id = row.get("NORAD_CAT_ID", "").strip()
+            if norad_id:
+                celestrak_data[norad_id] = row
+    
+    # Load GCAT data directly
+    gcat_data = {}
+    with open("data/gcat_satcat.tsv") as f:
+        for row in csv.DictReader(f, delimiter="\t"):
+            norad_id = row.get("NORAD", "").strip()
+            if norad_id:
+                gcat_data[norad_id] = row
+    
+    # Independent status category definitions
+    terminal_statuses = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    operational_statuses = {"O", "AO", "AO IN", "OX"}
+    
+    disagreement_count = 0
+    
+    for norad_id in set(celestrak_data.keys()) & set(gcat_data.keys()):
+        # Extract GCAT statuses
+        phases_value = gcat_data[norad_id].get("Phases", "")
+        try:
+            phases = json.loads(phases_value)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                phases = eval(phases_value)
+            except:
+                phases = []
+        
+        gcat_current_statuses = {p.get("Status", "").strip() for p in phases if isinstance(p, dict)}
+        
+        # Check Celestrak decay status
+        celestrak_has_decay = bool(celestrak_data[norad_id].get("DECAY_DATE", "").strip())
+        
+        # Evaluate disagreement
+        gcat_shows_terminal = bool(gcat_current_statuses & terminal_statuses)
+        gcat_shows_operational = bool(gcat_current_statuses & operational_statuses)
+        
+        if (gcat_shows_terminal and not celestrak_has_decay) or (gcat_shows_operational and celestrak_has_decay):
+            disagreement_count += 1
+    
+    return disagreement_count
+```

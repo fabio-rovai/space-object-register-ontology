@@ -1,0 +1,76 @@
+```python
+def disposition_disagreement_verify():
+    """
+    Independent verification of DispositionDisagreement count.
+    Uses explicit loops and direct condition checks rather than set comprehension,
+    providing a separate computation path for cross-validation.
+    """
+    celestrak_catalog = load_celestrak()
+    gcat_satcat_data, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    mismatch_count = 0
+    
+    for object_id in gcat_satcat_data:
+        if object_id not in celestrak_catalog:
+            continue
+        
+        # Collect all status values from GCAT phases
+        phases = gcat_satcat_data[object_id]
+        all_statuses = set()
+        for phase_record in phases:
+            status_value = phase_record.get("Status", "").strip()
+            if status_value:
+                all_statuses.add(status_value)
+        
+        # Get CelesTrak decay date
+        ct_decay_string = celestrak_catalog[object_id]["DECAY_DATE"].strip()
+        ct_has_decay = len(ct_decay_string) > 0
+        
+        # Check GCAT disposition
+        gcat_marked_gone = any(s in GONE for s in all_statuses)
+        gcat_marked_left_earth = any(s in LEFT_EARTH for s in all_statuses)
+        
+        # Disagreement occurs when gone status doesn't match decay date
+        if gcat_marked_gone == ct_has_decay:
+            continue
+        
+        # Exception: object left Earth with decay date is expected
+        if ct_has_decay and gcat_marked_left_earth and not gcat_marked_gone:
+            continue
+        
+        mismatch_count += 1
+    
+    return mismatch_count
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    
+    disposition_main = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+    
+    disposition_verify = disposition_disagreement_verify()
+    
+    if disposition_main != disposition_verify:
+        print(f"DispositionDisagreement cross-check FAILED: {disposition_main} != {disposition_verify}", file=sys.stderr)
+        sys.exit(1)
+    
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_main,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+```

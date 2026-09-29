@@ -1,0 +1,188 @@
+# ---- pipeline/verify_disposition.py ----
+"""Independent second computation of the DispositionDisagreement count.
+
+This path deliberately shares no code with reconcile.py or
+governance_report.py for the number itself:
+  * its own file parsing (csv module, header-indexed columns, no dict zip)
+  * its own status-code tables, transcribed separately from
+    planet4589.org/space/gcat/web/intro/phases.html
+  * its own identifier normalisation (int() on both catalogues)
+  * a different formulation of the rule: two disjoint directional buckets
+    summed, instead of an XOR with an exclusion clause
+
+The primary pipeline's count is imported only for the final comparison and
+for diagnostics. Any disagreement exits non-zero.
+"""
+import csv
+import sys
+import pathlib
+import collections
+
+csv.field_size_limit(10_000_000)
+
+HERE = pathlib.Path(__file__).resolve().parent
+DATA = HERE.parent / "data"
+
+# Independently transcribed status tables. Do not import these from reconcile.
+V_GONE = frozenset({
+    "R", "D", "L", "LF", "S", "F",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+})
+V_LEFT_EARTH = frozenset({
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+})
+
+
+def _norm_id(raw):
+    """Canonical NORAD id: decimal integer string, or None if not numeric."""
+    s = (raw or "").strip()
+    if not s.isdigit():
+        return None
+    return str(int(s))
+
+
+def _norm_status(raw):
+    """Collapse internal whitespace so 'AR  IN' and 'AR IN' compare equal."""
+    return " ".join((raw or "").split())
+
+
+def read_celestrak_decay(path):
+    """Return (all_ids, decayed_ids, diagnostics) from the CelesTrak SATCAT CSV."""
+    all_ids, decayed = set(), set()
+    diag = collections.Counter()
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        rdr = csv.reader(f)
+        header = [h.strip() for h in next(rdr)]
+        i_id = header.index("NORAD_CAT_ID")
+        i_dec = header.index("DECAY_DATE")
+        for row in rdr:
+            if not row:
+                continue
+            if len(row) <= max(i_id, i_dec):
+                diag["celestrak_short_row"] += 1
+                continue
+            nid = _norm_id(row[i_id])
+            if nid is None:
+                diag["celestrak_non_numeric_id"] += 1
+                continue
+            if nid in all_ids:
+                diag["celestrak_duplicate_id"] += 1
+            if row[i_id].strip() != nid:
+                diag["celestrak_id_needed_normalisation"] += 1
+            all_ids.add(nid)
+            if row[i_dec].strip():
+                decayed.add(nid)
+    return all_ids, decayed, diag
+
+
+def read_gcat_statuses(path):
+    """Return ({norad_id: set(status)}, diagnostics) from a GCAT TSV.
+
+    Rows are kept as long as they reach the Satcat and Status columns, rather
+    than being dropped whenever they are shorter than the full header.
+    """
+    statuses = collections.defaultdict(set)
+    diag = collections.Counter()
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        first = f.readline()
+        header = [h.strip() for h in first.lstrip("#").rstrip("\r\n").split("\t")]
+        i_sat = header.index("Satcat")
+        i_st = header.index("Status")
+        need = max(i_sat, i_st)
+        rdr = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+        for row in rdr:
+            if not row or (row[0].startswith("#")):
+                continue
+            if len(row) < len(header):
+                diag["gcat_row_shorter_than_header"] += 1
+            if len(row) <= need:
+                diag["gcat_row_unusable"] += 1
+                continue
+            nid = _norm_id(row[i_sat])
+            if nid is None:
+                continue
+            st = _norm_status(row[i_st])
+            if st != row[i_st].strip():
+                diag["gcat_status_whitespace_normalised"] += 1
+            statuses[nid].add(st)
+    return statuses, diag
+
+
+def disposition_disagreements(gcat_status, ct_ids, ct_decayed):
+    """Two disjoint directional buckets.
+
+    A: GCAT says the object is gone, CelesTrak shows no decay date.
+    B: CelesTrak shows a decay date, GCAT has no gone phase, and the object
+       did not leave Earth orbit (departures legitimately lack a GCAT 'gone').
+    """
+    bucket_a, bucket_b = set(), set()
+    for nid, sts in gcat_status.items():
+        if nid not in ct_ids:
+            continue
+        gone = not sts.isdisjoint(V_GONE)
+        decayed = nid in ct_decayed
+        if gone and not decayed:
+            bucket_a.add(nid)
+        elif decayed and not gone and sts.isdisjoint(V_LEFT_EARTH):
+            bucket_b.add(nid)
+    return bucket_a, bucket_b
+
+
+def _primary_ids():
+    """Reconstruct the primary path's id set, for diagnostics only."""
+    from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    return {
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+    }, GONE, LEFT_EARTH
+
+
+def main():
+    sys.path.insert(0, str(HERE))
+
+    ct_ids, ct_dec, ct_diag = read_celestrak_decay(DATA / "celestrak_satcat.csv")
+    gstat, g_diag = read_gcat_statuses(DATA / "gcat_satcat.tsv")
+    a, b = disposition_disagreements(gstat, ct_ids, ct_dec)
+    independent = len(a) + len(b)
+
+    from governance_report import python_side
+    primary = python_side()["DispositionDisagreement"]
+
+    print(f"DispositionDisagreement primary={primary} independent={independent} "
+          f"(gone-not-decayed={len(a)}, decayed-not-gone={len(b)})")
+    for k, v in sorted((ct_diag + g_diag).items()):
+        print(f"  diag {k}: {v}")
+
+    if primary == independent:
+        print("OK: independent verification agrees")
+        return 0
+
+    print("FAIL: independent verification disagrees", file=sys.stderr)
+    try:
+        prim_ids, p_gone, p_left = _primary_ids()
+        indep_ids = a | b
+        if set(p_gone) != V_GONE:
+            print(f"  status table GONE differs: primary-only={sorted(set(p_gone) - V_GONE)} "
+                  f"independent-only={sorted(V_GONE - set(p_gone))}", file=sys.stderr)
+        if set(p_left) != V_LEFT_EARTH:
+            print(f"  status table LEFT_EARTH differs: primary-only={sorted(set(p_left) - V_LEFT_EARTH)} "
+                  f"independent-only={sorted(V_LEFT_EARTH - set(p_left))}", file=sys.stderr)
+        only_p = sorted(prim_ids - indep_ids, key=int)
+        only_i = sorted(indep_ids - prim_ids, key=int)
+        print(f"  only in primary ({len(only_p)}): {only_p[:50]}", file=sys.stderr)
+        print(f"  only in independent ({len(only_i)}): {only_i[:50]}", file=sys.stderr)
+        for nid in (only_p + only_i)[:20]:
+            print(f"    {nid}: gcat_status={sorted(gstat.get(nid, set()))} "
+                  f"in_celestrak={nid in ct_ids} decayed={nid in ct_dec}", file=sys.stderr)
+    except Exception as e:  # diagnostics must never mask the failure
+        print(f"  (diagnostic reconstruction failed: {e!r})", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

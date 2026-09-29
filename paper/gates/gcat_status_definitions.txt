@@ -1,0 +1,77 @@
+Source: J. C. McDowell, GCAT, 'Phases and Status Values',
+https://planet4589.org/space/gcat/web/intro/phases.html (GCAT release 1.8.8), retrieved 29 Sep 2026.
+Text extracted verbatim from the page HTML; whitespace collapsed.
+
+Phases and Status Values 
+Each entry in the General Catalog represents a time period or phase in
+the flight history of an object. The !b status value describes the
+status of the object at the end of the phase. Typical values of the
+status are 'O' (still in orbit) and 'R' (reentered). But it can get a
+lot more complicated.
+ Phases 
+Each time an object transitions to another state (undocks, is attached to something, reenters,
+changes which body it is orbiting, etc.) marks the beginning or end of a
+ phase. 
+Most objects in GCAT have only a single phase - they separate from an object (launch vehicle) and
+then are either still in free flight or have reentered. However, some objects go through many phases.
+
+Status value Description Interpretation Externality 
+ Cases with t2 and Dest both empty 
+ O In orbit Sep from P at t1, still in free flight Free 
+ AO Attached in orbit Attached to P from t1 to present External 
+ AO IN Attached inside Inside P from t1 to present Internal 
+ UDK Undocked Docked to P from t1 to t2, sep from P at t2 External to free 
+ REL Released Attached to P from t1 to t2, sep from P at t2 External to free 
+ DEP Deployed Same as REL but for objects on planetary surface External to free 
+ TO Takeoff Launch from C surface (C is a small body, not a world) Free 
+ TOA (was ALO) Attached at takeoff Attached to P from t1 to t2 including at launch from C surface. External 
+ OX In orbit (probably) but lost As O, but no recent tracking data Free 
+ Dest is always blank but t2 is not 
+ E Exploded Sep from P at t1, free in orbit until breakup at t2. Next phase of this object is a debris fragment. Free 
+ N Renamed In orbit from t1 to t2, name or owner changed at t2. Next phase reflects new name and owner Free 
+ NA Renamed attached Attached to P from t1 to t2, name or owner changed at t2. Next phase reflects new name and owner External 
+ LEASE Lease Temporary lease from main owner from t1 to t2. SatType code is PA. Free 
+ Dest is a location on C, or C itself, or blank (see also 'Dest is a body name' below) 
+ S Targeted suborbital entry/impact Sep from P at t1, crashed or destroyed in atmosphere at t2 at end of launch trajectory Free 
+ R Reentered Sep from P at t1, destroyed in C's atmosphere at t2 after natural decay Free 
+ D Deorbited Sep from P at t1, destroyed in C's atmosphere at t2 via active deorbit maneuver Free 
+ L Landed Sep from P at t1, landed or splashed down on C's surface at t2 Free 
+ LF Failed landing Intact on reaching Earth surface but actually destroyed on or immediately after impact Free 
+ AS Suborbital reentered attached Attached to P from t1 to t2 when P reentered External 
+ AR Reentered attached Attached to P from t1 to t2 when P reentered External 
+ AR IN Reentered inside Inside P from t1 to t2 when P reentered Internal 
+ AL Landed attached Attached to P from t1 to t2 when P landed External 
+ AL IN Landed inside Inside P from t1 to t2 when P landed Internal 
+ TX Transmission ended Operated on C's surface from t1 to t2 Free 
+ F Failed Sep from P at t1, crashed or destroyed at t2 during launch failure Free 
+ AF Failed attached Attached to P at all times until it and P crashed or destroyed at t2 during launch failure External or internal. 
+ Dest is a JCAT from D catalog (deep space). JCAT ID used in deep space catalog for this object is given by the Dest value. 
+ DSO Deep space Sep from P at t1, passed deep space boundary at t2. Free 
+ DSA Deep space attached Attached to P since t1, passed deep space boundary at t2. External 
+ DSA IN Deep space inside Inside P since t1, passed deep space boundary at t2. Internal 
+ LO Liftoff Launch from C surface (C is a world but not Earth), catalog reassigned to dest Free 
+ LOA Reflight attached Launch from C surface (C is a world but not Earth) aboard parent object, catalog reassigned to dest External or Internal 
+ Dest is a JCAT from the main catalogs (not from D catalog) 
+ DK Docked Sep from P at t1, docked with D at t2 Free to External 
+ GRP Grappled Sep from P at t1, docked with D at t2 Free to External 
+ ATT Attached Was attached to P at t1, then attached to D at t2 External. 
+ TFR Transfer Inside P at t1, moved inside D at t2 Internal 
+ TFR E Transfer external Inside P at t1, moved to exterior of D at t2 Internal to External 
+ TFR IN Transfer in Outside P at t1, moved to interior of D at t2 External to Internal (same as RET) 
+ C Collided Collided with D at t2 Free 
+ EVA DP Spacewalk (depress) Inside P at t1, began depressurization of airlock of D at t2 Internal to External 
+ EVA RP Spacewalk (repress) Depressurized airlock of P at t1, repressurized airlock of D at t2 Internal to tethered or free to Internal 
+ REFLT Reflight Object reassigned to a new catalog number on its next flight Not applicable 
+ Dest is a body name 
+ EO Escape Left P's SOI at t1, In C's SOI from t1 to t2, entered D's SOI at t2 Free 
+ EAO Escape attached Attached to P from t1 to t2. In C's SOI till t2, then in D's SOI External 
+ EN Encounter same as EO, but denotes specifically a single flyby of the central body P with periapsis time equal to te (ODate value), before departing the SOI at t2. 
+ OI Orbit insertion Left P's SOI at t1, entered C's SOI at t1 and entered a bound orbit around C at t2. This will be paired with a next phase with an empty Parent (implied equal to C) describing the phase that begins with orbit insertion and ending with landing, impact or orbit departure OE. 
+ OE Orbit escape In orbit around C at t1, performed escape burn at t2. Next phase will describe the phase from escape burn to departing sphere of influence. 
+ Special cases 
+ ERR Error No object corresponding to this entry (tracking or cataloging errors) - 
+For case C (Collision) the collision can result in the destruction of the object, in which case there is no
+subsequent phase; or the object can survive, in which case t2 starts a new phase. If object A collides with object B,
+there is a C status for each of the objects A and B. That is, A has a phase that ends with 'A collides with B',
+and B has a phase that ends with 'B collides with A'. If A survives, B is the parent object for A's next phase,
+and vice versa.

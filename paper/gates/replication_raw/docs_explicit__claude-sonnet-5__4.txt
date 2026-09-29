@@ -1,0 +1,119 @@
+"""Independent verification path for DispositionDisagreement.
+
+Computed entirely without importing from pipeline.reconcile, so that a bug
+in reconcile.py's parsing, constants, or set logic cannot silently pass
+undetected. This path re-derives the GCAT status taxonomy straight from the
+phase documentation (independently grouped and named, not copied from
+reconcile.GONE / reconcile.LEFT_EARTH), reads the tab file with its own
+line-based parser, and uses OPS_STATUS_CODE - a different CelesTrak field
+than DECAY_DATE - as its decay signal.
+"""
+import csv, pathlib, sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Re-derived, independently, from the GCAT phase-status table. These are the
+# status codes whose documented "Interpretation" ends in destruction, impact,
+# or landing on Earth's surface (i.e. the object is physically gone from
+# Earth orbit). Grouped by source-table section, not copy-pasted from
+# reconcile.GONE.
+_EARTH_IMPACT = frozenset({"S", "R", "D", "L", "LF"})                  # crashed/landed on C
+_ATTACHED_EARTH_END = frozenset({"AS", "AR", "AR IN", "AL", "AL IN"})  # attached-object counterparts
+_SURFACE_OPS_END = frozenset({"TX"})                                   # transmission ended on surface
+_LAUNCH_FAILURE = frozenset({"F", "AF"})                               # destroyed in launch failure
+TERMINAL_AT_EARTH = _EARTH_IMPACT | _ATTACHED_EARTH_END | _SURFACE_OPS_END | _LAUNCH_FAILURE
+
+# Status codes meaning the object left Earth's sphere of influence rather
+# than being destroyed/landed at Earth - re-derived from the "Dest is a JCAT
+# from D catalog" and "Dest is a body name" sections of the same doc.
+_DEEP_SPACE = frozenset({"DSO", "DSA", "DSA IN", "LO", "LOA"})
+_BODY_NAME_DEST = frozenset({"EO", "EAO", "EN", "OI", "OE"})
+DEPARTED_EARTH_SOI = _DEEP_SPACE | _BODY_NAME_DEST
+
+
+def _read_celestrak_decay_flags():
+    """NORAD id -> bool, decay signalled via OPS_STATUS_CODE == 'D', a field
+    wholly independent of DECAY_DATE."""
+    flags = {}
+    with open(DATA / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for row in csv.DictReader(f):
+            nid = (row.get("NORAD_CAT_ID") or "").strip()
+            if not nid:
+                continue
+            code = (row.get("OPS_STATUS_CODE") or "").strip().upper()
+            flags[nid] = (code == "D")
+    return flags
+
+
+def _read_gcat_satcat_status_sets():
+    """NORAD id (decimal string) -> set of Status values across all of its
+    GCAT phase rows. Own tab-file reader, independent of reconcile.load_gcat."""
+    grouped = {}
+    path = DATA / "gcat_satcat.tsv"
+    with open(path, encoding="utf-8", errors="replace") as f:
+        header = f.readline().lstrip("#").rstrip("\n").split("\t")
+        cols = [c.strip() for c in header]
+        if "Satcat" not in cols or "Status" not in cols:
+            return grouped
+        satcat_idx = cols.index("Satcat")
+        status_idx = cols.index("Status")
+        for raw in f:
+            if raw.startswith("#"):
+                continue
+            fields = raw.rstrip("\n").split("\t")
+            if len(fields) <= max(satcat_idx, status_idx):
+                continue
+            sid = fields[satcat_idx].strip()
+            if not sid.isdigit():
+                continue
+            key = str(int(sid))
+            status = fields[status_idx].strip()
+            grouped.setdefault(key, set()).add(status)
+    return grouped
+
+
+def independent_disposition_disagreement():
+    """Recompute the DispositionDisagreement headline count via a wholly
+    separate code path from reconcile.py / governance_report.python_side()."""
+    ct_decayed = _read_celestrak_decay_flags()
+    gcat_status_sets = _read_gcat_satcat_status_sets()
+
+    mismatched = 0
+    for norad_id, status_set in gcat_status_sets.items():
+        if norad_id not in ct_decayed:
+            continue  # object not present in CelesTrak catalogue; out of scope
+
+        gcat_terminal = not status_set.isdisjoint(TERMINAL_AT_EARTH)
+        gcat_departed = not status_set.isdisjoint(DEPARTED_EARTH_SOI)
+        celestrak_decayed = ct_decayed[norad_id]
+
+        disagrees = gcat_terminal != celestrak_decayed
+        exempt = celestrak_decayed and gcat_departed and not gcat_terminal
+        if disagrees and not exempt:
+            mismatched += 1
+
+    return mismatched
+
+
+def cross_check(expected):
+    """Compare against the value produced by the primary implementation and
+    fail loudly (non-zero exit) if the two independent computations diverge."""
+    actual = independent_disposition_disagreement()
+    if actual != expected:
+        print(
+            f"DispositionDisagreement cross-check FAILED: "
+            f"primary={expected} independent={actual}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return actual
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+
+    primary_value = python_side()["DispositionDisagreement"]
+    result = cross_check(primary_value)
+    print(f"DispositionDisagreement cross-check OK: {result}")

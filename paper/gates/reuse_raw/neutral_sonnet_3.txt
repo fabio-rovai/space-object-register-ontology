@@ -1,0 +1,35 @@
+from reconcile import load_celestrak, load_gcat, GONE, INORBIT, LEFT_EARTH, ERROR, LOST, statuses
+
+def python_side_verify():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+
+    count = 0
+    for norad, phases in sat.items():
+        row = ct.get(norad)
+        if row is None:
+            continue
+        has_decay = bool(row["DECAY_DATE"].strip())
+        is_gone = False
+        is_inorbit = False
+        for p in phases:
+            status = p.get("Status", "").strip()
+            if status in GONE:
+                is_gone = True
+            if status in INORBIT:
+                is_inorbit = True
+        if (is_gone and not has_decay) or (is_inorbit and has_decay):
+            count += 1
+
+    return {"DispositionDisagreement": count}
+
+
+def cross_check():
+    from governance_report import python_side
+    primary = python_side()["DispositionDisagreement"]
+    secondary = python_side_verify()["DispositionDisagreement"]
+    if primary != secondary:
+        raise ValueError(
+            f"DispositionDisagreement mismatch: primary={primary} secondary={secondary}"
+        )
+    return primary

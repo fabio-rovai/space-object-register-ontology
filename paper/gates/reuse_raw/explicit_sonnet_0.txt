@@ -1,0 +1,55 @@
+import csv
+
+DECAY_INDICATING_CODES = frozenset({
+    "R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+})
+ORBIT_INDICATING_CODES = frozenset({
+    "O", "AO", "AO IN", "OX",
+})
+
+
+def _read_celestrak_decay_flags(path="data/celestrak_satcat.csv"):
+    known = set()
+    decayed = set()
+    with open(path, newline="", encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh):
+            norad = (rec.get("NORAD_CAT_ID") or "").strip()
+            if not norad:
+                continue
+            known.add(norad)
+            if (rec.get("DECAY_DATE") or "").strip():
+                decayed.add(norad)
+    return known, decayed
+
+
+def _read_gcat_status_sets(path="data/gcat_satcat.tsv"):
+    status_sets = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for rec in csv.DictReader(fh, delimiter="\t"):
+            norad = (rec.get("Satcat") or "").strip()
+            if not norad:
+                continue
+            code = (rec.get("Status") or "").strip()
+            status_sets.setdefault(norad, set()).add(code)
+    return status_sets
+
+
+def verify_disposition_disagreement():
+    celestrak_known, celestrak_decayed = _read_celestrak_decay_flags()
+    gcat_status_sets = _read_gcat_status_sets()
+
+    shared = celestrak_known & set(gcat_status_sets)
+
+    disagreement_count = 0
+    for norad in shared:
+        codes = gcat_status_sets[norad]
+        gcat_marks_decayed = bool(codes & DECAY_INDICATING_CODES)
+        gcat_marks_orbiting = bool(codes & ORBIT_INDICATING_CODES)
+        celestrak_marks_decayed = norad in celestrak_decayed
+
+        if gcat_marks_decayed and not celestrak_marks_decayed:
+            disagreement_count += 1
+        elif gcat_marks_orbiting and celestrak_marks_decayed:
+            disagreement_count += 1
+
+    return {"DispositionDisagreement": disagreement_count}

@@ -1,0 +1,169 @@
+"""
+pipeline/verify_reconcile.py
+
+Independent, non-shared re-derivation of the DispositionDisagreement metric.
+
+This module re-implements the disagreement check from first principles,
+re-reading the raw source files with its own parsing routines and its own
+transcription of the GCAT status taxonomy. It shares no functions, no
+constants, and no data structures with pipeline/reconcile.py or
+pipeline/governance_report.py. Its only purpose is to give the governance
+gate a second, structurally different computation path to cross-check
+against.
+"""
+import csv, pathlib, sys
+
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_DATA = _ROOT / "data"
+
+# --- Independent transcription of the GCAT status taxonomy -----------------
+#
+# Per planet4589.org/space/gcat/web/intro/phases.html, statuses fall into
+# groups. An object's phase history tells us whether it has physically
+# terminated at Earth (destroyed, landed, transmission ceased on a surface,
+# failed) versus whether it has departed Earth's vicinity entirely (deep
+# space, escape, orbit around another body) versus other in-orbit/attached
+# cases.
+#
+# These sets are built independently here, directly from the status table,
+# without consulting pipeline/reconcile.py's GONE / LEFT_EARTH / ERROR / LOST
+# sets, and without importing that module.
+
+_TERMINATED_AT_EARTH = frozenset({
+    "R", "D", "L", "LF", "S", "F", "AF",
+    "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+})
+
+_DEPARTED_EARTH_VICINITY = frozenset({
+    "DSO", "DSA", "DSA IN",
+    "EO", "EAO", "EN",
+    "OI", "OE",
+    "LO", "LOA",
+})
+
+
+def _read_celestrak_decay_flags():
+    """Return {norad_id_str: bool(has_decay_date)} read directly from the CSV."""
+    flags = {}
+    path = _DATA / "celestrak_satcat.csv"
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = next(reader)
+        try:
+            id_col = header.index("NORAD_CAT_ID")
+            decay_col = header.index("DECAY_DATE")
+        except ValueError:
+            return flags
+        for row in reader:
+            if len(row) <= max(id_col, decay_col):
+                continue
+            norad = row[id_col].strip()
+            if not norad:
+                continue
+            flags[norad] = bool(row[decay_col].strip())
+    return flags
+
+
+def _read_gcat_status_union_per_object():
+    """
+    Stream gcat_satcat.tsv once, accumulating per-object union of statuses
+    seen across all of its phase rows directly into a dict, without ever
+    materialising a full phases-by-object list-of-dicts structure.
+
+    Returns {norad_id_str: set-of-status-strings}.
+    """
+    path = _DATA / "gcat_satcat.tsv"
+    status_union = {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        header_line = fh.readline().lstrip("#").rstrip("\n")
+        columns = [c.strip() for c in header_line.split("\t")]
+        try:
+            satcat_idx = columns.index("Satcat")
+            status_idx = columns.index("Status")
+        except ValueError:
+            return status_union
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) <= max(satcat_idx, status_idx):
+                continue
+            satcat_raw = fields[satcat_idx].strip()
+            if not satcat_raw.isdigit():
+                continue
+            norad = str(int(satcat_raw))
+            status = fields[status_idx].strip()
+            bucket = status_union.setdefault(norad, set())
+            bucket.add(status)
+    return status_union
+
+
+def independent_disposition_disagreement():
+    """
+    Recompute the count of objects for which CelesTrak's decay flag and
+    GCAT's phase-derived disposition disagree, using an entirely separate
+    code path from pipeline/reconcile.py and pipeline/governance_report.py.
+
+    Business rule (re-derived independently from the GCAT status table):
+      - An object is "terminated at Earth" per GCAT if any of its phase
+        statuses falls in _TERMINATED_AT_EARTH.
+      - An object is "decayed" per CelesTrak if it has a non-empty
+        DECAY_DATE.
+      - A mismatch between these two booleans is a disagreement UNLESS the
+        object carries a status in _DEPARTED_EARTH_VICINITY (it left
+        Earth's vicinity rather than decaying in the usual sense) while
+        carrying no _TERMINATED_AT_EARTH status - in that case CelesTrak
+        marking it decayed is not treated as a contradiction.
+      - Only objects present in both catalogues are considered.
+    """
+    decay_flags = _read_celestrak_decay_flags()
+    gcat_status_union = _read_gcat_status_union_per_object()
+
+    mismatch_count = 0
+    for norad, statuses in gcat_status_union.items():
+        if norad not in decay_flags:
+            continue
+
+        celestrak_says_decayed = decay_flags[norad]
+        gcat_says_terminated = not statuses.isdisjoint(_TERMINATED_AT_EARTH)
+
+        if celestrak_says_decayed == gcat_says_terminated:
+            continue  # agreement, nothing to count
+
+        gcat_says_departed = not statuses.isdisjoint(_DEPARTED_EARTH_VICINITY)
+        if celestrak_says_decayed and gcat_says_departed and not gcat_says_terminated:
+            # Left Earth's vicinity rather than decayed - not a true
+            # disagreement.
+            continue
+
+        mismatch_count += 1
+
+    return mismatch_count
+
+
+def main():
+    independent_count = independent_disposition_disagreement()
+
+    try:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        from governance_report import python_side as _existing_python_side
+        existing_count = _existing_python_side()["DispositionDisagreement"]
+    except Exception as exc:  # pragma: no cover - defensive only
+        print(f"verify_reconcile: could not load existing computation: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    print(f"DispositionDisagreement: independent={independent_count} existing={existing_count}")
+
+    if independent_count != existing_count:
+        print(
+            "verify_reconcile: MISMATCH between independent and existing "
+            "DispositionDisagreement computations",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print("verify_reconcile: DispositionDisagreement cross-check OK")
+
+
+if __name__ == "__main__":
+    main()

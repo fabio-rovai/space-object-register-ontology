@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Independent second computation of the DispositionDisagreement count.
+
+This module deliberately imports nothing from reconcile.py or
+governance_report.py for its computation. It has its own file parsing, its own
+NORAD ID normalisation and its own transcription of the GCAT status vocabulary.
+
+Metric definition (the shared specification both implementations must meet):
+  Consider every object that appears in GCAT satcat.tsv with a numeric Satcat
+  number and also appears in the CelesTrak SATCAT.
+    gcat_says_gone      = at least one phase has a terminal status
+    celestrak_says_gone = DECAY_DATE is non-empty
+  The object is a disagreement when those two flags differ, except where
+  CelesTrak shows a decay, GCAT has a departed-Earth-orbit status and GCAT
+  has no terminal status. That case is treated as consistent because the
+  object left Earth orbit rather than re-entering.
+
+Limit on independence: the meaning of each status code comes from the GCAT
+documentation (planet4589.org/space/gcat/web/intro/phases.html), which is
+necessarily shared. The table below was transcribed separately. It should be
+reviewed against that page by someone other than the author of reconcile.py.
+Status codes that appear in the data but are not in the table are reported
+rather than silently ignored.
+
+Deliberate differences from the primary path. Each one is reported in the
+diagnostics so that a mismatch can be traced to its cause:
+  * NORAD IDs from both CelesTrak and GCAT are normalised to int, so
+    zero-padded IDs such as "00005" and "5" match.
+  * A GCAT row that is shorter than the header is still used when its Satcat
+    and Status columns are present. The number of such rows is reported.
+  * Whitespace inside status codes is collapsed, so "AR  IN" becomes "AR IN".
+
+Usage:
+  python verify_disposition.py                      # print result as JSON
+  python verify_disposition.py --expect N           # exit 1 if result != N
+  python verify_disposition.py --compare-primary    # exit 1 if it differs from governance_report
+"""
+import argparse
+import csv
+import json
+import os
+import re
+import sys
+
+csv.field_size_limit(sys.maxsize if sys.maxsize < 2**63 else 2**31 - 1)
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.join(os.path.dirname(_HERE), "data")
+CELESTRAK_FILE = os.path.join(_DATA_DIR, "celestrak_satcat.csv")
+GCAT_SATCAT_FILE = os.path.join(_DATA_DIR, "gcat_satcat.tsv")
+
+TERMINAL = "terminal"
+DEPARTED = "departed"
+ORBITING = "orbiting"
+INVALID = "invalid"
+
+_STATUS_TABLE = """
+R       terminal
+D       terminal
+L       terminal
+LF      terminal
+S       terminal
+F       terminal
+AF      terminal
+AS      terminal
+AR      terminal
+AR IN   terminal
+AL      terminal
+AL IN   terminal
+TX      terminal
+DSO     departed
+DSA     departed
+DSA IN  departed
+EO      departed
+EAO     departed
+EN      departed
+OI      departed
+OE      departed
+LO      departed
+LOA     departed
+O       orbiting
+AO      orbiting
+AO IN   orbiting
+OX      orbiting
+ERR     invalid
+"""
+
+
+def _parse_status_table(text):
+    table = {}
+    for raw in text.strip().splitlines():
+        parts = raw.split()
+        if not parts:
+            continue
+        category = parts[-1]
+        code = " ".join(parts[:-1])
+        if code in table and table[code] != category:
+            raise ValueError("conflicting category for status %r" % code)
+        table[code] = category
+    return table
+
+
+STATUS_CATEGORY = _parse_status_table(_STATUS_TABLE)
+
+_DIGITS = re.compile(r"\s*0*(\d+)\s*$")
+
+
+def _norad_key(value):
+    if value is None:
+        return None
+    m = _DIGITS.match(value)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
+def _norm_status(value):
+    return " ".join((value or "").split())
+
+
+def read_celestrak_decay(path=CELESTRAK_FILE):
+    """Return {norad_int: has_decay_bool} and the number of IDs seen more than once."""
+    decay = {}
+    duplicates = 0
+    with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        try:
+            id_col = header.index("NORAD_CAT_ID")
+            decay_col = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise SystemExit("CelesTrak header missing expected column: %s" % exc)
+        for row in reader:
+            if len(row) <= max(id_col, decay_col):
+                continue
+            key = _norad_key(row[id_col])
+            if key is None:
+                continue
+            has_decay = bool(row[decay_col].strip())
+            if key in decay:
+                duplicates += 1
+                has_decay = has_decay or decay[key]
+            decay[key] = has_decay
+    return decay, duplicates
+
+
+def read_gcat_status_categories(path=GCAT_SATCAT_FILE):
+    """Return ({norad_int: set(categories)}, diagnostics)."""
+    cats = {}
+    unknown = {}
+    short_rows_used = 0
+    header = None
+    sat_col = status_col = None
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        for line_no, line in enumerate(fh, 1):
+            line = line.rstrip("\r\n")
+            if header is None:
+                if not line.strip():
+                    continue
+                header = [h.strip() for h in line.lstrip("#").split("\t")]
+                try:
+                    sat_col = header.index("Satcat")
+                    status_col = header.index("Status")
+                except ValueError as exc:
+                    raise SystemExit("GCAT header missing expected column: %s" % exc)
+                continue
+            if line.startswith("#") or not line.strip():
+                continue
+            fields = line.split("\t")
+            if len(fields) <= max(sat_col, status_col):
+                continue
+            if len(fields) < len(header):
+                short_rows_used += 1
+            key = _norad_key(fields[sat_col])
+            if key is None:
+                continue
+            code = _norm_status(fields[status_col])
+            category = STATUS_CATEGORY.get(code)
+            bucket = cats.setdefault(key, set())
+            if category is None:
+                unknown[code] = unknown.get(code, 0) + 1
+                bucket.add("unknown")
+            else:
+                bucket.add(category)
+    diagnostics = {
+        "gcat_short_rows_used": short_rows_used,
+        "gcat_unknown_status_codes": dict(sorted(unknown.items())),
+    }
+    return cats, diagnostics
+
+
+def classify(categories, celestrak_decayed):
+    gcat_gone = TERMINAL in categories
+    if gcat_gone == celestrak_decayed:
+        return False
+    if celestrak_decayed and not gcat_gone and DEPARTED in categories:
+        return False
+    return True
+
+
+def compute_disposition_disagreement():
+    decay, ct_dupes = read_celestrak_decay()
+    gcat, diag = read_gcat_status_categories()
+    flagged = []
+    for norad in sorted(gcat.keys() & decay.keys()):
+        if classify(gcat[norad], decay[norad]):
+            flagged.append(norad)
+    diag.update({
+        "celestrak_objects": len(decay),
+        "celestrak_duplicate_ids": ct_dupes,
+        "gcat_numbered_objects": len(gcat),
+        "matched_objects": len(gcat.keys() & decay.keys()),
+    })
+    return len(flagged), flagged, diag
+
+
+def _primary_value():
+    sys.path.insert(0, _HERE)
+    import governance_report
+    return governance_report.python_side()["DispositionDisagreement"]
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--expect", type=int, default=None)
+    ap.add_argument("--compare-primary", action="store_true")
+    ap.add_argument("--dump-ids", action="store_true")
+    args = ap.parse_args(argv)
+
+    count, ids, diag = compute_disposition_disagreement()
+    result = {"DispositionDisagreement": count, "diagnostics": diag}
+    if args.dump_ids:
+        result["ids"] = ids
+
+    failures = []
+    if args.expect is not None and args.expect != count:
+        failures.append("expected %d, independent path got %d" % (args.expect, count))
+    if args.compare_primary:
+        primary = _primary_value()
+        result["primary"] = primary
+        if primary != count:
+            failures.append("primary path %d != independent path %d" % (primary, count))
+    if diag["gcat_unknown_status_codes"]:
+        print("WARNING: unmapped GCAT status codes: %s"
+              % json.dumps(diag["gcat_unknown_status_codes"]), file=sys.stderr)
+
+    print(json.dumps(result, indent=2))
+    if failures:
+        for msg in failures:
+            print("MISMATCH: " + msg, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,70 @@
+import csv
+from pathlib import Path
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+DECAY_CODES = frozenset({
+    "R", "D", "L", "LF", "S", "F",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+})
+ORBIT_CODES = frozenset({
+    "O", "AO", "AO IN", "OX",
+})
+
+
+def _read_celestrak_decay_flags():
+    path = DATA_DIR / "celestrak_satcat.csv"
+    known = set()
+    decayed = set()
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            raw = row.get("NORAD_CAT_ID", "").strip()
+            if not raw:
+                continue
+            norad = int(raw)
+            known.add(norad)
+            if row.get("DECAY_DATE", "").strip():
+                decayed.add(norad)
+    return known, decayed
+
+
+def _read_gcat_status_map():
+    path = DATA_DIR / "gcat_satcat.tsv"
+    status_map = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh, delimiter="\t"):
+            raw = row.get("Satcat", "").strip()
+            if not raw or raw == "-":
+                continue
+            try:
+                norad = int(raw)
+            except ValueError:
+                continue
+            status = row.get("Status", "").strip()
+            status_map.setdefault(norad, set()).add(status)
+    return status_map
+
+
+def verify_disposition_disagreement():
+    ct_known, ct_decayed = _read_celestrak_decay_flags()
+    gcat_status = _read_gcat_status_map()
+
+    shared_ids = ct_known & set(gcat_status)
+
+    disagreement_count = 0
+    for norad in shared_ids:
+        codes = gcat_status[norad]
+        marked_decayed = norad in ct_decayed
+        says_decayed = bool(codes & DECAY_CODES)
+        says_orbiting = bool(codes & ORBIT_CODES)
+
+        if says_decayed and not marked_decayed:
+            disagreement_count += 1
+        elif says_orbiting and marked_decayed:
+            disagreement_count += 1
+
+    return disagreement_count
+
+
+if __name__ == "__main__":
+    print({"DispositionDisagreement": verify_disposition_disagreement()})

@@ -1,0 +1,129 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT", "")[:6] for p in sat[n]}) > 1}),
+    }
+
+
+def _gcat_end_status(phases):
+    """Independent derivation: fold phases in file order, tracking the
+    LAST status seen per object plus whether GONE/LEFT_EARTH were EVER hit,
+    via an explicit accumulator loop rather than a set comprehension over
+    the whole phase collection at once."""
+    ever_gone = False
+    ever_left_earth = False
+    last_status = ""
+    for p in phases:
+        s = p.get("Status", "")
+        if s is None:
+            continue
+        s = s.strip()
+        if not s:
+            continue
+        last_status = s
+        if s in GONE:
+            ever_gone = True
+        if s in LEFT_EARTH:
+            ever_left_earth = True
+    return ever_gone, ever_left_earth, last_status
+
+
+def _celestrak_decayed(row):
+    d = row.get("DECAY_DATE")
+    if d is None:
+        return False
+    d = d.strip()
+    return len(d) > 0
+
+
+def disposition_disagreement_independent(ct, sat):
+    """Recomputes DispositionDisagreement via a code path that shares no
+    machinery with python_side(): no shared 'st' dict, no set-intersection
+    membership tests against a precomputed GONE-mask, and iteration driven
+    by CelesTrak's rows rather than GCAT's rows. Returns (count, mismatched_ids)."""
+    disagreeing = set()
+    checked = 0
+    for norad, ct_row in ct.items():
+        phases = sat.get(norad)
+        if phases is None:
+            continue
+        checked += 1
+        gcat_gone, gcat_left_earth, _ = _gcat_end_status(phases)
+        ct_decayed = _celestrak_decayed(ct_row)
+
+        if gcat_gone == ct_decayed:
+            agree = True
+        else:
+            if ct_decayed and gcat_left_earth and (not gcat_gone):
+                agree = True
+            else:
+                agree = False
+
+        if not agree:
+            disagreeing.add(norad)
+
+    return len(disagreeing), disagreeing
+
+
+def cross_check_disposition_disagreement(ct, sat, reported_count):
+    indep_count, indep_ids = disposition_disagreement_independent(ct, sat)
+    if indep_count != reported_count:
+        st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+        ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+        original_ids = {
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+        }
+        only_in_reported = original_ids - indep_ids
+        only_in_independent = indep_ids - original_ids
+        sys.stderr.write(
+            "DispositionDisagreement cross-check FAILED: "
+            f"reported={reported_count} independent={indep_count}\n"
+            f"only_in_reported ({len(only_in_reported)}): {sorted(only_in_reported)[:20]}\n"
+            f"only_in_independent ({len(only_in_independent)}): {sorted(only_in_independent)[:20]}\n"
+        )
+        return False
+    return True
+
+
+def main():
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+
+    metrics = python_side()
+
+    ok = cross_check_disposition_disagreement(ct, sat, metrics["DispositionDisagreement"])
+    print(json.dumps(metrics, indent=2))
+    if not ok:
+        sys.exit(1)
+    print("DispositionDisagreement cross-check OK: independent recomputation agrees.")
+
+
+if __name__ == "__main__":
+    main()

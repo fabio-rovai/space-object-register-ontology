@@ -1,0 +1,85 @@
+```python
+import csv
+import collections
+import pathlib
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+def verify_disposition_disagreement_independent():
+    """
+    Independent verification of DispositionDisagreement count.
+    Uses different code and constants from the primary implementation.
+    """
+    
+    # Load CelesTrak SATCAT independently
+    celestrak_objects = {}
+    with open(DATA / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for row in csv.DictReader(f):
+            norad_id = row["NORAD_CAT_ID"].strip()
+            is_decayed = row["DECAY_DATE"].strip() != ""
+            celestrak_objects[norad_id] = is_decayed
+    
+    # Load GCAT SATCAT independently
+    gcat_phases = collections.defaultdict(list)
+    with open(DATA / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        header_line = f.readline().lstrip("#").rstrip("\n")
+        column_list = [h.strip() for h in header_line.split("\t")]
+        
+        for line in f:
+            if line.startswith("#"):
+                continue
+            
+            field_values = line.rstrip("\n").split("\t")
+            if len(field_values) < len(column_list):
+                continue
+            
+            phase_data = dict(zip(column_list, [fv.strip() for fv in field_values]))
+            satcat_value = phase_data.get("Satcat", "")
+            
+            if satcat_value.isdigit():
+                obj_id = str(int(satcat_value))
+                gcat_phases[obj_id].append(phase_data)
+    
+    # Independently defined status categories
+    terminated_status_codes = {
+        "R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"
+    }
+    
+    departed_status_codes = {
+        "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"
+    }
+    
+    # Count disagreements
+    disagreement_count = 0
+    
+    for obj_id in gcat_phases:
+        if obj_id not in celestrak_objects:
+            continue
+        
+        # Collect all statuses from phases
+        all_statuses = set()
+        for phase_record in gcat_phases[obj_id]:
+            status_value = phase_record.get("Status", "").strip()
+            if status_value:
+                all_statuses.add(status_value)
+        
+        # Compute both dispositions
+        gcat_says_terminated = len(all_statuses & terminated_status_codes) > 0
+        celestrak_says_decayed = celestrak_objects[obj_id]
+        
+        # Check if they disagree
+        if gcat_says_terminated != celestrak_says_decayed:
+            # Special case: exclude objects that departed but didn't terminate
+            if celestrak_says_decayed and len(all_statuses & departed_status_codes) > 0 and len(all_statuses & terminated_status_codes) == 0:
+                continue
+            
+            disagreement_count += 1
+    
+    return disagreement_count
+
+if __name__ == "__main__":
+    result = verify_disposition_disagreement_independent()
+    print(f"DispositionDisagreement (independent verification): {result}")
+```

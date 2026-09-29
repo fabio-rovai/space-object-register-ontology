@@ -1,0 +1,63 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def independent_disposition_disagreement(sat, st, ct, ctdec, GONE, LEFT_EARTH):
+    """Independent verification of DispositionDisagreement using validity checks."""
+    count = 0
+    for norad_id in sat:
+        if norad_id not in ct:
+            continue
+        
+        gcat_statuses = st[norad_id]
+        ct_is_gone = norad_id in ctdec
+        gcat_has_gone = bool(gcat_statuses & GONE)
+        gcat_has_left_earth = bool(gcat_statuses & LEFT_EARTH)
+        
+        is_valid = False
+        if gcat_has_gone and ct_is_gone:
+            is_valid = True
+        elif not gcat_has_gone and not ct_is_gone:
+            is_valid = True
+        elif not gcat_has_gone and ct_is_gone and gcat_has_left_earth:
+            is_valid = True
+        
+        if not is_valid:
+            count += 1
+    
+    return count
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    
+    original_disposition = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+    
+    independent_disposition = independent_disposition_disagreement(sat, st, ct, ctdec, GONE, LEFT_EARTH)
+    
+    if original_disposition != independent_disposition:
+        print(f"DispositionDisagreement verification failed: original={original_disposition}, independent={independent_disposition}", file=sys.stderr)
+        sys.exit(1)
+    
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": original_disposition,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }

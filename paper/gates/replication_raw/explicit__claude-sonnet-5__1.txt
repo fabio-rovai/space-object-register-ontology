@@ -1,0 +1,178 @@
+```python
+# ---- pipeline/verify_disposition_independent.py ----
+"""Independent, from-scratch recomputation of DispositionDisagreement.
+
+This module deliberately does NOT import anything from reconcile.py and does
+NOT reuse any of its constants (GONE, LEFT_EARTH, ERROR, LOST) or helper
+functions (load_celestrak, load_gcat). It re-parses the raw source files with
+its own hand-rolled readers and applies its own status taxonomy, built as an
+explicit lookup table rather than set literals, so that a defect in the
+original implementation is unlikely to be mirrored here. The only thing the
+two paths are allowed to share is the definition of the headline metric
+itself and the on-disk file names/columns, since both must read the same
+source-of-truth data.
+"""
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Independent re-derivation of the GCAT phase taxonomy
+# (see planet4589.org/space/gcat/web/intro/phases.html), expressed as an
+# explicit code -> category table rather than a handful of set literals.
+_PHASE_CATEGORY = {}
+for _code in ("R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"):
+    _PHASE_CATEGORY[_code] = "terminal"
+for _code in ("O", "AO", "AO IN", "OX"):
+    _PHASE_CATEGORY[_code] = "orbiting"
+for _code in ("DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"):
+    _PHASE_CATEGORY[_code] = "departed"
+for _code in ("ERR",):
+    _PHASE_CATEGORY[_code] = "error"
+
+
+def _category(code):
+    return _PHASE_CATEGORY.get(code.strip(), "unknown")
+
+
+def _read_delimited(path, delimiter):
+    """Minimal hand-rolled delimited-file reader (no csv module, no shared
+    parsing helpers), returning a list of field->value dicts."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = [ln.rstrip("\n") for ln in fh]
+
+    header_line = None
+    for ln in lines:
+        if ln.startswith("#"):
+            continue
+        header_line = ln
+        break
+    if header_line is None:
+        return []
+
+    fields = [h.strip() for h in header_line.split(delimiter)]
+    records = []
+    started = False
+    for ln in lines:
+        if not started:
+            if ln == header_line:
+                started = True
+            continue
+        if not ln or ln.startswith("#"):
+            continue
+        values = ln.split(delimiter)
+        if len(values) < len(fields):
+            continue
+        records.append({f: values[i].strip() for i, f in enumerate(fields)})
+    return records
+
+
+def _split_csv_line(line):
+    """Hand-rolled CSV splitter, quote-aware, independent of the csv module."""
+    out, cur, in_quotes = [], [], False
+    for ch in line:
+        if ch == '"':
+            in_quotes = not in_quotes
+        elif ch == "," and not in_quotes:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    out.append("".join(cur))
+    return out
+
+
+def _read_celestrak_csv(path):
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        raw = fh.read().splitlines()
+    if not raw:
+        return []
+    header = [h.strip() for h in _split_csv_line(raw[0])]
+    records = []
+    for line in raw[1:]:
+        if not line:
+            continue
+        vals = _split_csv_line(line)
+        if len(vals) < len(header):
+            continue
+        records.append({header[i]: vals[i].strip() for i in range(len(header))})
+    return records
+
+
+def _normalize_norad(value):
+    value = (value or "").strip()
+    if not value.isdigit():
+        return None
+    return str(int(value))
+
+
+def independent_disposition_disagreement():
+    """Recompute the DispositionDisagreement headline number from scratch,
+    using a taxonomy and parsing path that share no code with reconcile.py.
+    """
+    ct_records = _read_celestrak_csv(DATA / "celestrak_satcat.csv")
+    ct_ids = set()
+    ct_decay = {}
+    for rec in ct_records:
+        nid = _normalize_norad(rec.get("NORAD_CAT_ID", ""))
+        if nid is None:
+            continue
+        ct_ids.add(nid)
+        ct_decay[nid] = bool(rec.get("DECAY_DATE", "").strip())
+
+    gcat_records = _read_delimited(DATA / "gcat_satcat.tsv", "\t")
+    phase_cats_by_id = {}
+    for rec in gcat_records:
+        nid = _normalize_norad(rec.get("Satcat", ""))
+        if nid is None:
+            continue
+        phase_cats_by_id.setdefault(nid, set()).add(_category(rec.get("Status", "")))
+
+    mismatches = 0
+    for nid in ct_ids:
+        cats = phase_cats_by_id.get(nid)
+        if cats is None:
+            continue  # object absent from the GCAT phase catalogue entirely
+
+        went_terminal = "terminal" in cats
+        departed_without_terminal = ("departed" in cats) and not went_terminal
+        decayed_in_ct = ct_decay[nid]
+
+        disagree = went_terminal != decayed_in_ct
+        if decayed_in_ct and departed_without_terminal:
+            disagree = False
+
+        if disagree:
+            mismatches += 1
+
+    return mismatches
+
+
+def cross_check(expected_value):
+    """Compare this independent recomputation against a value produced by
+    the primary implementation. Returns (ok, independent_value)."""
+    independent_value = independent_disposition_disagreement()
+    return independent_value == expected_value, independent_value
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side  # cross-check target only
+
+    primary = python_side()["DispositionDisagreement"]
+    ok, independent_value = cross_check(primary)
+
+    print(f"primary (reconcile.py-based):      {primary}")
+    print(f"independent (from-scratch):        {independent_value}")
+
+    if not ok:
+        print(
+            f"DISAGREEMENT: DispositionDisagreement mismatch between "
+            f"implementations ({primary} != {independent_value})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print("OK: both implementations agree on DispositionDisagreement")
+```

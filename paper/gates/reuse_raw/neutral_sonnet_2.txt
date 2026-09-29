@@ -1,0 +1,19 @@
+def python_side_verify():
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    mismatches = 0
+    for n in set(ct) & set(sat):
+        decayed_in_celestrak = bool(ct[n]["DECAY_DATE"].strip())
+        st = statuses(sat[n])
+        is_gone = bool(st & GONE)
+        is_inorbit = bool(st & INORBIT)
+        if (is_gone and not decayed_in_celestrak) or (is_inorbit and decayed_in_celestrak):
+            mismatches += 1
+    return {"DispositionDisagreement": mismatches}
+
+def verify_disposition_disagreement():
+    primary = python_side()["DispositionDisagreement"]
+    check = python_side_verify()["DispositionDisagreement"]
+    if primary != check:
+        raise ValueError(f"DispositionDisagreement mismatch: primary={primary} verify={check}")
+    return primary

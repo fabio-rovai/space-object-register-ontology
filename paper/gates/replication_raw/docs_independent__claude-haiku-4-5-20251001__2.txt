@@ -1,0 +1,53 @@
+```python
+def verify_disposition_disagreement():
+    """
+    Independent verification path for DispositionDisagreement.
+    Recomputes using alternative algorithm to cross-check python_side() result.
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    disagreement_count = 0
+    
+    for norad_id in sat:
+        if norad_id not in ct:
+            continue
+        
+        # Collect statuses from all phases
+        phases = sat[norad_id]
+        statuses = set()
+        for phase in phases:
+            s = phase.get("Status", "").strip()
+            if s:
+                statuses.add(s)
+        
+        # GCAT disposition determination
+        gcat_gone = bool(statuses & GONE)
+        gcat_left_earth = bool(statuses & LEFT_EARTH)
+        
+        # CelesTrak disposition determination
+        ct_decayed = bool(ct[norad_id]["DECAY_DATE"].strip())
+        
+        # Check for disagreement
+        if gcat_gone != ct_decayed:
+            # Exception: CT decayed, GCAT shows LEFT_EARTH without GONE
+            if ct_decayed and gcat_left_earth and not gcat_gone:
+                continue
+            disagreement_count += 1
+    
+    return disagreement_count
+
+
+def python_side_with_verification():
+    """Compute headline numbers and cross-check DispositionDisagreement."""
+    primary_result = python_side()
+    verified_disagreement = verify_disposition_disagreement()
+    
+    if primary_result["DispositionDisagreement"] != verified_disagreement:
+        raise AssertionError(
+            f"DispositionDisagreement mismatch: "
+            f"{primary_result['DispositionDisagreement']} vs {verified_disagreement}"
+        )
+    
+    return primary_result
+```

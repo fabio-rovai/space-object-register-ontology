@@ -1,0 +1,129 @@
+# ---- pipeline/verify_disposition.py ----
+"""Independent, second-opinion recomputation of DispositionDisagreement.
+
+Deliberately does NOT import anything from reconcile.py or governance_report.py.
+It re-parses the raw source files with its own I/O code and re-derives its own
+status taxonomy from the GCAT phase-code documentation, so that a bug or a
+wrong constant in the primary pipeline cannot silently propagate into this
+check. If the two independently-computed counts diverge, that itself is a
+governance failure and must halt the pipeline.
+"""
+import csv
+import pathlib
+
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_DATA = _ROOT / "data"
+
+# Independently transcribed from planet4589.org/space/gcat/web/intro/phases.html.
+# Deliberately re-derived rather than imported: this is a *check* on the other
+# transcription, not a reuse of it.
+_DEORBIT_PHASE_CODES = frozenset((
+    "R", "D", "L", "LF", "S", "F",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+))
+_DEPARTED_EARTH_ORBIT_PHASE_CODES = frozenset((
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+))
+
+
+def _read_celestrak_decay_flags():
+    """id -> True if CelesTrak records a decay date, parsed without DictReader."""
+    path = _DATA / "celestrak_satcat.csv"
+    flags = {}
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = next(reader)
+        id_col = header.index("NORAD_CAT_ID")
+        decay_col = header.index("DECAY_DATE")
+        for row in reader:
+            if len(row) <= max(id_col, decay_col):
+                continue
+            norad_id = row[id_col].strip()
+            if not norad_id:
+                continue
+            flags[norad_id] = bool(row[decay_col].strip())
+    return flags
+
+
+def _read_gcat_satcat_phase_codes():
+    """id -> set of phase-status codes, parsed without the zip/dict-row helper."""
+    path = _DATA / "gcat_satcat.tsv"
+    codes_by_id = {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        header_line = fh.readline().lstrip("#").rstrip("\n")
+        columns = [c.strip() for c in header_line.split("\t")]
+        satcat_idx = columns.index("Satcat")
+        status_idx = columns.index("Status")
+        width = len(columns)
+        for raw_line in fh:
+            if raw_line.startswith("#"):
+                continue
+            fields = raw_line.rstrip("\n").split("\t")
+            if len(fields) < width:
+                continue
+            satcat_field = fields[satcat_idx].strip()
+            if not satcat_field.isdigit():
+                continue
+            norad_id = str(int(satcat_field))
+            status = fields[status_idx].strip()
+            codes_by_id.setdefault(norad_id, set()).add(status)
+    return codes_by_id
+
+
+def _object_is_flagged_gone(phase_codes):
+    return any(code in _DEORBIT_PHASE_CODES for code in phase_codes)
+
+
+def _object_left_earth_orbit(phase_codes):
+    return any(code in _DEPARTED_EARTH_ORBIT_PHASE_CODES for code in phase_codes)
+
+
+def recompute_disposition_disagreement():
+    """Second, independently-coded count of DispositionDisagreement."""
+    decay_flags = _read_celestrak_decay_flags()
+    gcat_codes = _read_gcat_satcat_phase_codes()
+
+    mismatched = 0
+    for norad_id, phase_codes in gcat_codes.items():
+        if norad_id not in decay_flags:
+            continue
+
+        celestrak_says_decayed = decay_flags[norad_id]
+        gcat_says_gone = _object_is_flagged_gone(phase_codes)
+        gcat_says_departed = _object_left_earth_orbit(phase_codes)
+
+        disagreement = gcat_says_gone != celestrak_says_decayed
+        benign_departure = (
+            celestrak_says_decayed and gcat_says_departed and not gcat_says_gone
+        )
+
+        if disagreement and not benign_departure:
+            mismatched += 1
+
+    return mismatched
+
+
+def verify_against(primary_count):
+    """Raise if this independent recomputation disagrees with the primary path."""
+    independent_count = recompute_disposition_disagreement()
+    if independent_count != primary_count:
+        raise SystemExit(
+            "GOVERNANCE CHECK FAILED: DispositionDisagreement mismatch between "
+            f"primary pipeline ({primary_count}) and independent verification "
+            f"({independent_count})."
+        )
+    return independent_count
+
+
+if __name__ == "__main__":
+    print(recompute_disposition_disagreement())
+
+
+# ---- pipeline/governance_report.py (integration additions) ----
+import verify_disposition  # noqa: E402  (added independent cross-check)
+
+
+def cross_check_disposition_disagreement(metrics):
+    """Wire the independent recomputation into the governance gate."""
+    verify_disposition.verify_against(metrics["DispositionDisagreement"])
+    return metrics

@@ -12,14 +12,20 @@ DATA = ROOT / "data"
 # GCAT status codes, from planet4589.org/space/gcat/web/intro/phases.html
 #
 # CORRECTED 18 Aug 2026. The first version of this file treated only reentry and
-# landing codes as "gone" and everything else as "still in orbit". That was wrong
-# in two ways and it inflated the published disagreement count by a factor of 3.6.
-#   1. E (exploded) and C (collided) destroy the object and were being counted as
-#      "still in orbit".
-#   2. Codes such as DK, ATT, TFR and GRP end a phase because the object joined
-#      another object. GCAT is making no claim about current disposition there,
-#      so those objects must be excluded from a disposition comparison rather
-#      than counted as a disagreement.
+# landing codes as "gone" and everything else as "still in orbit". The default was
+# the main error: codes such as DK, ATT, TFR and GRP end a phase because the object
+# joined another object, and were counted as disagreements. They are now excluded.
+#
+# KNOWN ISSUE, 29 Sep 2026. The 18 Aug correction also put E and C in DESTROYED,
+# and that is a misreading. GCAT's definitions say that after E "the next phase of
+# this object is a debris fragment", and that C destroys the object only if no
+# subsequent phase follows. The files loaded here hold one record per object; GCAT
+# keeps later phases in its event catalogue (ecat), which this pipeline does not
+# read. The same page also lists UDK, REL, DEP, TO and TOA as current free-flight
+# states, not transitions. Read through full histories the disposition count is
+# 220, not the 261 this module produces: see paper/gates/history_check.py. The
+# constants below are left unchanged until the pipeline loads ecat and classifies
+# each object by its latest phase.
 # A trailing "?" marks an uncertain date, not a different status, so it is stripped.
 
 DESTROYED = {"R","D","L","LF","S","F","AF","AS","AR","AR IN","AL","AL IN","TX","E","C"}

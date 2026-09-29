@@ -1,0 +1,147 @@
+```python
+# ---- pipeline/verify_disposition.py ----
+"""Independent, second-opinion computation of DispositionDisagreement.
+
+This module is a deliberately standalone re-implementation. It does not
+import reconcile.py or governance_report.py for any part of its
+computation (only for the final comparison at the bottom), does not reuse
+their status-code constants, and does not reuse their file-parsing
+helpers. The goal is a genuinely separate path through the same raw data
+files, so that agreement between the two results is real evidence rather
+than a restatement of shared code.
+"""
+import csv
+import sys
+import collections
+import pathlib
+
+csv.field_size_limit(10_000_000)
+
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_DATA = _ROOT / "data"
+
+# Phase codes that mean "object is no longer in orbit" (decayed, deployed
+# away, fragmented, etc). Authored independently from the GCAT phase
+# glossary; intentionally not shared with any other module's constant.
+_TERMINAL_PHASE_CODES = frozenset({
+    "R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN",
+    "AL", "AL IN", "TX",
+})
+
+# Phase codes meaning the object left Earth orbit / escaped, which is a
+# different fate from decaying and should not itself count as agreement
+# failure when CelesTrak also shows a decay date.
+_ESCAPE_PHASE_CODES = frozenset({
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+})
+
+
+def _read_celestrak_decay_flags():
+    """norad id (str, unpadded) -> True if CelesTrak lists a non-empty decay date."""
+    flags = {}
+    path = _DATA / "celestrak_satcat.csv"
+    with path.open(newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        try:
+            header = next(reader)
+        except StopIteration:
+            return flags
+        try:
+            id_col = header.index("NORAD_CAT_ID")
+            decay_col = header.index("DECAY_DATE")
+        except ValueError:
+            return flags
+        for row in reader:
+            if len(row) <= max(id_col, decay_col):
+                continue
+            raw_id = row[id_col].strip()
+            if not raw_id:
+                continue
+            try:
+                norad = str(int(raw_id))
+            except ValueError:
+                continue
+            flags[norad] = bool(row[decay_col].strip())
+    return flags
+
+
+def _read_gcat_satcat_phase_codes():
+    """norad id -> set of raw GCAT 'Status' phase codes, parsed from scratch."""
+    phase_codes = collections.defaultdict(set)
+    path = _DATA / "gcat_satcat.tsv"
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        header_line = None
+        for raw_line in fh:
+            stripped = raw_line.rstrip("\n")
+            if header_line is None:
+                header_line = stripped.lstrip("#")
+                columns = [c.strip() for c in header_line.split("\t")]
+                try:
+                    satcat_idx = columns.index("Satcat")
+                    status_idx = columns.index("Status")
+                except ValueError:
+                    return phase_codes
+                continue
+            if stripped.startswith("#"):
+                continue
+            fields = stripped.split("\t")
+            if len(fields) <= max(satcat_idx, status_idx):
+                continue
+            satcat_field = fields[satcat_idx].strip()
+            if not satcat_field.isdigit():
+                continue
+            norad = str(int(satcat_field))
+            phase_codes[norad].add(fields[status_idx].strip())
+    return phase_codes
+
+
+def compute_disposition_disagreement_independent():
+    decay_flags = _read_celestrak_decay_flags()
+    phase_codes_by_norad = _read_gcat_satcat_phase_codes()
+
+    mismatch_count = 0
+    for norad, codes in phase_codes_by_norad.items():
+        if norad not in decay_flags:
+            continue  # only compare objects present in both catalogues
+
+        celestrak_says_decayed = decay_flags[norad]
+        gcat_looks_terminal = bool(codes & _TERMINAL_PHASE_CODES)
+        gcat_looks_escaped = bool(codes & _ESCAPE_PHASE_CODES)
+
+        disagree = gcat_looks_terminal != celestrak_says_decayed
+
+        # An object CelesTrak marks decayed but which GCAT shows only as
+        # having escaped Earth orbit (never marked terminal) is a known,
+        # legitimate divergence, not a data-quality disagreement.
+        if celestrak_says_decayed and gcat_looks_escaped and not gcat_looks_terminal:
+            disagree = False
+
+        if disagree:
+            mismatch_count += 1
+
+    return mismatch_count
+
+
+def main():
+    independent = compute_disposition_disagreement_independent()
+
+    # Pull in the primary result only for the final comparison; the
+    # computation above never touches reconcile.py or governance_report.py.
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side as _primary_python_side
+
+    primary = _primary_python_side()["DispositionDisagreement"]
+
+    if primary != independent:
+        sys.stderr.write(
+            f"DispositionDisagreement cross-check FAILED: "
+            f"primary={primary} independent={independent}\n"
+        )
+        sys.exit(1)
+
+    print(f"DispositionDisagreement cross-check OK: {independent}")
+
+
+if __name__ == "__main__":
+    main()
+```

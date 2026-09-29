@@ -1,0 +1,34 @@
+```python
+def verify_disposition_disagreement(ct, sat, st, ctdec):
+    """Independent verification of DispositionDisagreement by iterating through all satellites."""
+    disagreements = set()
+    both = set(ct) & set(sat)
+    
+    for norad in both:
+        status = st[norad]
+        has_decay = norad in ctdec
+        is_gone = bool(status & GONE)
+        is_inorbit = bool(status & INORBIT)
+        
+        if (is_gone and not has_decay) or (is_inorbit and has_decay):
+            disagreements.add(norad)
+    
+    return len(disagreements)
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    st = {n: statuses(v) for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    both = set(ct) & set(sat)
+    gone = {n for n in both if st[n] & GONE}
+    inorb = {n for n in both if st[n] & INORBIT}
+    
+    primary_result = len((gone - ctdec) | (inorb & ctdec))
+    verify_result = verify_disposition_disagreement(ct, sat, st, ctdec)
+    
+    assert primary_result == verify_result, f"Mismatch: {primary_result} vs {verify_result}"
+    
+    return {"DispositionDisagreement": primary_result}
+```

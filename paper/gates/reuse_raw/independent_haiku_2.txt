@@ -1,0 +1,42 @@
+```python
+def verify_disposition_disagreement():
+    """
+    Independent verification path for DispositionDisagreement count.
+    Uses different logic to cross-check the main result.
+    """
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    
+    # Reconstruct statuses from scratch via iteration
+    gcat_statuses = {}
+    for norad, phases in sat.items():
+        status_set = set()
+        for phase in phases:
+            status = phase.get("Status", "").strip()
+            if status:
+                status_set.add(status)
+        gcat_statuses[norad] = status_set
+    
+    # Find decay dates via iteration
+    decay_dates = set()
+    for norad, row in ct.items():
+        if row["DECAY_DATE"].strip():
+            decay_dates.add(norad)
+    
+    # Iterate through common satellites to count disagreements
+    disagreement_count = 0
+    for norad in ct:
+        if norad not in sat:
+            continue
+        
+        statuses = gcat_statuses[norad]
+        has_decay = norad in decay_dates
+        
+        is_gone = bool(statuses & GONE)
+        is_inorbit = bool(statuses & INORBIT)
+        
+        if (is_gone and not has_decay) or (is_inorbit and has_decay):
+            disagreement_count += 1
+    
+    return disagreement_count
+```

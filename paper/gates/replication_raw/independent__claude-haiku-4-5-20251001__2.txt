@@ -1,0 +1,79 @@
+```python
+"""Dual-computation governance gate.
+
+Every headline number is computed twice: set-based in Python from the source
+files, and via SPARQL over the emitted graph. Any disagreement exits non-zero.
+"""
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def verify_disposition_disagreement_independent(ct_data, sat_data, status_table, decay_dates):
+    """
+    Independent verification of DispositionDisagreement.
+    Recomputes using explicit conditional logic instead of set comprehension
+    to provide cross-validation of the original calculation.
+    """
+    count = 0
+    
+    for norad_id in sat_data.keys():
+        if norad_id not in ct_data:
+            continue
+        
+        statuses = status_table[norad_id]
+        gcat_marked_gone = bool(statuses & GONE)
+        ct_marked_decayed = norad_id in decay_dates
+        
+        disagreement_exists = (gcat_marked_gone != ct_marked_decayed)
+        
+        if not disagreement_exists:
+            continue
+        
+        is_left_earth_exception = (
+            ct_marked_decayed and 
+            (statuses & LEFT_EARTH) and 
+            not gcat_marked_gone
+        )
+        
+        if is_left_earth_exception:
+            continue
+        
+        count += 1
+    
+    return count
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    
+    disposition_disagreement = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+    
+    disposition_disagreement_verified = verify_disposition_disagreement_independent(
+        ct, sat, st, ctdec)
+    
+    assert disposition_disagreement == disposition_disagreement_verified, \
+        f"DispositionDisagreement verification failed: {disposition_disagreement} != {disposition_disagreement_verified}"
+    
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_disagreement,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+```

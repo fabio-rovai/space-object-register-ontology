@@ -1,0 +1,227 @@
+{
+  "compared_objects": 69249,
+  "time_skew_excluded": 116,
+  "missing_from_currentcat": 22,
+  "kind_mismatches": 176,
+  "mismatch_pairs": {
+    "left->gone": 71,
+    "left->inorbit": 66,
+    "left->unrecorded": 8,
+    "unrecorded->gone": 1,
+    "gone->unrecorded": 2,
+    "unrecorded->inorbit": 15,
+    "inorbit->gone": 12,
+    "gone->inorbit": 1
+  },
+  "mismatch_examples": {
+    "21": {
+      "name": "LUNA 3",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "1960-04-20"
+    },
+    "98": {
+      "name": "EXPLORER 10",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "1961-06-30"
+    },
+    "566": {
+      "name": "LUNA 4",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "674": {
+      "name": "VELA 2",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "692": {
+      "name": "VELA 1",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "693": {
+      "name": "EXPLORER 18 (IMP-1)",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "1965-12-30"
+    },
+    "836": {
+      "name": "OPS 3662 (VELA 3)",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "837": {
+      "name": "OPS 3674 (VELA 4)",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "843": {
+      "name": "ATLAS AGENA B R/B",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "879": {
+      "name": "OGO 1",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "2020-08-29"
+    },
+    "1087": {
+      "name": "ATLAS AGENA B R/B",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "1388": {
+      "name": "EXPLORER 28 (IMP-3)",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "1968-07-04"
+    },
+    "1458": {
+      "name": "OPS 6577 (VELA 5)",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "1459": {
+      "name": "OPS 6564 (VELA 6)",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "2001": {
+      "name": "SL-6 R/B(2)",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2130": {
+      "name": "SL-6 R/B(2)",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2131": {
+      "name": "SL-6 DEB",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2132": {
+      "name": "SL-6 DEB",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2187": {
+      "name": "ATLAS CENTAUR R/B",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2258": {
+      "name": "EXPLORER 33 (AIMP-D)",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2260": {
+      "name": "DELTA 1 R/B(2)",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2395": {
+      "name": "ATLAS AGENA D R/B",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "2512": {
+      "name": "SURVEYOR MODEL 3",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "1966-11-06"
+    },
+    "2513": {
+      "name": "ATLAS CENTAUR R/B",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2535": {
+      "name": "ATLAS AGENA D R/B",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "1966-11-15"
+    },
+    "2705": {
+      "name": "COSMOS 146",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": "1967-03-18"
+    },
+    "2764": {
+      "name": "ATLAS CENTAUR R/B",
+      "ours": "left",
+      "currentcat": "Lost",
+      "ct_decay": ""
+    },
+    "2765": {
+      "name": "OPS 6638 (VELA 7)",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "2766": {
+      "name": "OPS 6679 (VELA 8)",
+      "ours": "left",
+      "currentcat": "In Earth orbit",
+      "ct_decay": ""
+    },
+    "2817": {
+      "name": "EXPLORER 34 (IMP-4)",
+      "ours": "left",
+      "currentcat": "Reentered Earth atmosphere",
+      "ct_decay": "1969-05-03"
+    }
+  },
+  "disagreement_count_history_check": 220,
+  "disagreement_count_currentcat": 219,
+  "in_history_only": [
+    "13475",
+    "30597",
+    "31864",
+    "34410",
+    "43881",
+    "48078",
+    "56631",
+    "57432",
+    "59764",
+    "61772",
+    "69324",
+    "69631"
+  ],
+  "in_currentcat_only": [
+    "2705",
+    "6689",
+    "6896",
+    "23646",
+    "24913",
+    "32057",
+    "33404",
+    "35221",
+    "37966",
+    "48924",
+    "59277"
+  ]
+}

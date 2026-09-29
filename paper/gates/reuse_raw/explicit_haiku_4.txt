@@ -1,0 +1,42 @@
+```python
+def verify_disposition_disagreement_independent():
+    """
+    Independent cross-check of DispositionDisagreement count.
+    Does not use GONE, INORBIT constants or statuses() function.
+    """
+    from reconcile import load_celestrak, load_gcat
+    
+    celestrak_db = load_celestrak()
+    gcat_db, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    # Status codes defined independently
+    terminal_codes = {
+        "R", "D", "L", "LF", "S", "F", "AF", "AS", 
+        "AR", "AR IN", "AL", "AL IN", "TX"
+    }
+    operational_codes = {"O", "AO", "AO IN", "OX"}
+    
+    disagreements = 0
+    
+    for norad_id in set(celestrak_db) & set(gcat_db):
+        # Extract statuses from GCAT phases
+        sat_statuses = set()
+        for phase in gcat_db[norad_id]:
+            s = phase.get("Status", "").strip()
+            if s:
+                sat_statuses.add(s)
+        
+        # Check decay status in Celestrak
+        decay = celestrak_db[norad_id].get("DECAY_DATE", "").strip()
+        has_decay_entry = bool(decay)
+        
+        # Identify disposition category
+        is_terminal = bool(sat_statuses & terminal_codes)
+        is_operational = bool(sat_statuses & operational_codes)
+        
+        # Count mismatch: terminal without decay or operational with decay
+        if (is_terminal and not has_decay_entry) or (is_operational and has_decay_entry):
+            disagreements += 1
+    
+    return disagreements
+```

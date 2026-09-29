@@ -1,0 +1,66 @@
+```python
+def independent_disposition_disagreement_check():
+    """
+    Independent verification of DispositionDisagreement count.
+    Separate implementation, no shared code or constants with python_side().
+    """
+    import csv
+    
+    # Load CelesTrak with independent logic
+    celestrak_entries = {}
+    with open(DATA / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for record in csv.DictReader(f):
+            catalog_num = record["NORAD_CAT_ID"].strip()
+            celestrak_entries[catalog_num] = record
+    
+    objects_with_decay_date = {
+        cid for cid in celestrak_entries 
+        if celestrak_entries[cid]["DECAY_DATE"].strip()
+    }
+    
+    # Load GCAT satcat with independent parsing
+    gcat_phases_by_id = {}
+    with open(DATA / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        header_text = f.readline().lstrip("#").rstrip("\n")
+        field_names = [fld.strip() for fld in header_text.split("\t")]
+        
+        for text_line in f:
+            if text_line.startswith("#"):
+                continue
+            field_values = text_line.rstrip("\n").split("\t")
+            if len(field_values) < len(field_names):
+                continue
+            row_data = dict(zip(field_names, [v.strip() for v in field_values]))
+            
+            sc_value = row_data.get("Satcat", "")
+            if sc_value.isdigit():
+                catalog_id = str(int(sc_value))
+                if catalog_id not in gcat_phases_by_id:
+                    gcat_phases_by_id[catalog_id] = []
+                gcat_phases_by_id[catalog_id].append(row_data)
+    
+    # Independently defined status categories
+    terminal_end_states = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    left_earth_orbit_states = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+    
+    # Count disagreements with independent logic
+    disagreement_total = 0
+    
+    for obj_id in gcat_phases_by_id:
+        if obj_id not in celestrak_entries:
+            continue
+        
+        all_phase_records = gcat_phases_by_id[obj_id]
+        phase_status_set = {pr.get("Status", "").strip() for pr in all_phase_records}
+        
+        gcat_terminal_marker = bool(phase_status_set & terminal_end_states)
+        celestrak_decay_marker = obj_id in objects_with_decay_date
+        
+        # Detect disagreement
+        if gcat_terminal_marker != celestrak_decay_marker:
+            # Exception clause: has decay date with leo/escape status but no terminal
+            if not (celestrak_decay_marker and (phase_status_set & left_earth_orbit_states) and not gcat_terminal_marker):
+                disagreement_total += 1
+    
+    return disagreement_total
+```

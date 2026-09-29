@@ -1,0 +1,72 @@
+import csv
+import pathlib
+
+def verify_disposition_disagreement_independent():
+    """
+    Independent verification of DispositionDisagreement count.
+    Separate implementation with no shared code or constants from governance_report.py
+    """
+    ROOT = pathlib.Path(__file__).resolve().parent.parent
+    DATA = ROOT / "data"
+    
+    csv.field_size_limit(10_000_000)
+    
+    # Independently defined status classifications
+    TERMINAL_DISPOSED = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    ESCAPED_EARTH = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+    
+    # Load CelesTrak catalog
+    celestrak_data = {}
+    with open(DATA / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for record in csv.DictReader(f):
+            celestrak_data[record["NORAD_CAT_ID"].strip()] = record
+    
+    # Load GCAT satcat phases
+    gcat_data = {}
+    with open(DATA / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        header_raw = f.readline().lstrip("#").rstrip("\n")
+        column_names = [col.strip() for col in header_raw.split("\t")]
+        
+        for line in f:
+            if line.startswith("#"):
+                continue
+            values = line.rstrip("\n").split("\t")
+            if len(values) < len(column_names):
+                continue
+            
+            row = dict(zip(column_names, [v.strip() for v in values]))
+            satcat_val = row.get("Satcat", "")
+            
+            if satcat_val.isdigit():
+                norad_id = str(int(satcat_val))
+                if norad_id not in gcat_data:
+                    gcat_data[norad_id] = []
+                gcat_data[norad_id].append(row)
+    
+    # Compute disagreement count
+    disagreement_total = 0
+    
+    for object_id in gcat_data:
+        if object_id not in celestrak_data:
+            continue
+        
+        # Extract all statuses from GCAT phases for this object
+        phases = gcat_data[object_id]
+        gcat_statuses = {phase.get("Status", "").strip() for phase in phases}
+        
+        # Determine disposition from GCAT
+        gcat_is_disposed = bool(gcat_statuses & TERMINAL_DISPOSED)
+        gcat_escaped = bool(gcat_statuses & ESCAPED_EARTH)
+        
+        # Determine disposition from CelesTrak
+        decay_date = celestrak_data[object_id]["DECAY_DATE"].strip()
+        ct_is_disposed = bool(decay_date)
+        
+        # Check for disagreement
+        if gcat_is_disposed != ct_is_disposed:
+            # Exception: when CelesTrak shows decay, but GCAT shows escape without terminal state
+            if ct_is_disposed and gcat_escaped and not gcat_is_disposed:
+                continue
+            disagreement_total += 1
+    
+    return disagreement_total

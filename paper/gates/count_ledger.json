@@ -1,0 +1,51 @@
+{
+  "unit": "objects present in both CelesTrak SATCAT and GCAT satcat, by NORAD number",
+  "shared_objects": 69390,
+  "v0_total": 932,
+  "v0_gcat_gone_celestrak_silent": 163,
+  "v0_celestrak_decayed_gcat_not_gone": 769,
+  "v0_celestrak_decayed_gcat_not_gone_by_status": {
+    "DK or ATT (docking, attachment)": 500,
+    "other transition (TFR, GRP, N, ...)": 140,
+    "E or C (explosion, collision)": 57,
+    "OX (in orbit, tracking lost)": 31,
+    "ERR (error entry)": 21,
+    "O or AO (in orbit)": 14,
+    "gone (R, D, L, AR, ...)": 6
+  },
+  "v0_by_status": {
+    "DK or ATT (docking, attachment)": 500,
+    "gone (R, D, L, AR, ...)": 169,
+    "other transition (TFR, GRP, N, ...)": 140,
+    "E or C (explosion, collision)": 57,
+    "OX (in orbit, tracking lost)": 31,
+    "ERR (error entry)": 21,
+    "O or AO (in orbit)": 14
+  },
+  "v1_total": 261,
+  "v1_excluded_transition_objects": 998,
+  "v1_excluded_transition_that_were_v0_disagreements": 640,
+  "v0_to_v1_dropped": 724,
+  "v0_to_v1_dropped_by_status": {
+    "DK or ATT (docking, attachment)": 500,
+    "other transition (TFR, GRP, N, ...)": 140,
+    "E or C (explosion, collision)": 57,
+    "ERR (error entry)": 21,
+    "gone (R, D, L, AR, ...)": 6
+  },
+  "v0_to_v1_added": 53,
+  "v0_to_v1_added_by_status": {
+    "E or C (explosion, collision)": 44,
+    "gone (R, D, L, AR, ...)": 9
+  },
+  "v2_total": 220,
+  "v1_to_v2_dropped": 42,
+  "v1_to_v2_dropped_by_status": {
+    "E or C (explosion, collision)": 42
+  },
+  "v1_to_v2_added": 1,
+  "v1_to_v2_added_by_status": {
+    "DK or ATT (docking, attachment)": 1
+  },
+  "v0_and_v2": 208
+}

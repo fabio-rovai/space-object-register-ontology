@@ -1,0 +1,101 @@
+"""Dual-computation governance gate.
+
+Every headline number is computed twice: set-based in Python from the source
+files, and via SPARQL over the emitted graph. Any disagreement exits non-zero.
+"""
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+
+def _disposition_disagreement_primary(ct, sat, st, ctdec):
+    """Original set-comprehension formulation."""
+    return {
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+    }
+
+
+def _disposition_disagreement_verify(ct, sat, st, ctdec):
+    """Independent re-derivation of the same predicate.
+
+    Walks each candidate NORAD id explicitly and classifies it into named
+    booleans rather than relying on the single compressed boolean expression
+    used by the primary path. Logically this should select exactly the same
+    set: an object where GCAT-gone-ness disagrees with CelesTrak-decayed-ness,
+    except for the carve-out where CelesTrak marks it decayed and GCAT's
+    phases only show it having left Earth (escape/heliocentric/etc.) without
+    any GCAT "gone" phase -- that carve-out is not itself a disagreement.
+    """
+    mismatches = set()
+    for n in sat:
+        if n not in ct:
+            continue
+
+        gcat_statuses = st[n]
+        gcat_marks_gone = False
+        for code in gcat_statuses:
+            if code in GONE:
+                gcat_marks_gone = True
+                break
+
+        gcat_marks_left_earth = False
+        for code in gcat_statuses:
+            if code in LEFT_EARTH:
+                gcat_marks_left_earth = True
+                break
+
+        ct_marks_decayed = n in ctdec
+
+        disagree = gcat_marks_gone is not ct_marks_decayed
+
+        is_carve_out = (
+            ct_marks_decayed
+            and gcat_marks_left_earth
+            and not gcat_marks_gone
+        )
+
+        if disagree and not is_carve_out:
+            mismatches.add(n)
+
+    return mismatches
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+
+    primary = _disposition_disagreement_primary(ct, sat, st, ctdec)
+    verified = _disposition_disagreement_verify(ct, sat, st, ctdec)
+
+    if primary != verified:
+        only_primary = sorted(primary - verified)
+        only_verify = sorted(verified - primary)
+        print(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement cross-check "
+            f"mismatch. primary={len(primary)} verify={len(verified)} "
+            f"only_in_primary={only_primary[:20]} only_in_verify={only_verify[:20]}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len(primary),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT", "")[:6] for p in sat[n]}) > 1}),
+    }

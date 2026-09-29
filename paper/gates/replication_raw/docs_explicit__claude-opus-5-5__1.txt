@@ -1,0 +1,174 @@
+"""Independent verification of the DispositionDisagreement count.
+
+This module deliberately shares no code, constants, or imports with
+pipeline/reconcile.py or pipeline/governance_report.py. The status
+classification is re-derived from the GCAT 'Phases and Status Values'
+page (release 1.8.8, retrieved 29 Sep 2026). Each set lists the codes
+of one documentation section. The file parsers are separate
+implementations.
+
+Definition being verified:
+  For each NORAD number present in both CelesTrak SATCAT and GCAT satcat,
+  let G = the object's GCAT phases include a terminal "gone" status,
+      E = the object's GCAT phases include a "left Earth" status,
+      C = CelesTrak records a non-empty DECAY_DATE.
+  The object is a disagreement when (G and not C) or (C and not G and not E).
+  This is the same as (G != C) with decayed-but-departed objects excluded.
+
+Exit codes: 0 = computed (and matched --expect if given),
+            1 = mismatch against --expect, 2 = input problem.
+"""
+import argparse
+import csv
+import json
+import pathlib
+import sys
+
+# Status codes, grouped by the documentation section that defines them.
+
+# Section "Dest is a location on C, or C itself, or blank": every code here
+# ends with the object destroyed, landed, crashed, or no longer operating.
+_DOC_SECTION_DEST_ON_BODY = frozenset([
+    "S", "R", "D", "L", "LF",
+    "AS", "AR", "AR IN", "AL", "AL IN",
+    "TX", "F", "AF",
+])
+
+# Section "Dest is a JCAT from D catalog (deep space)".
+_DOC_SECTION_DEEP_SPACE = frozenset([
+    "DSO", "DSA", "DSA IN", "LO", "LOA",
+])
+
+# Section "Dest is a body name" (escape, encounter, orbit insertion or escape).
+_DOC_SECTION_BODY_NAME = frozenset([
+    "EO", "EAO", "EN", "OI", "OE",
+])
+
+_VERIFY_TERMINAL = _DOC_SECTION_DEST_ON_BODY
+_VERIFY_DEPARTED = _DOC_SECTION_DEEP_SPACE | _DOC_SECTION_BODY_NAME
+
+
+def _norad_key(raw):
+    """Return a canonical NORAD key (decimal digits, no leading zeros), or None."""
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s or not all("0" <= ch <= "9" for ch in s):
+        return None
+    return str(int(s))
+
+
+def _read_celestrak_decay(path):
+    """Map each NORAD key to True if CelesTrak lists a decay date, else False."""
+    decayed = {}
+    with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = next(reader, None)
+        if header is None:
+            raise ValueError(f"{path}: empty file")
+        header = [h.strip().lstrip("\ufeff") for h in header]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise ValueError(f"{path}: missing required column ({exc})") from None
+        need = max(i_id, i_dec)
+        for row in reader:
+            if len(row) <= need:
+                continue
+            key = _norad_key(row[i_id])
+            if key is None:
+                continue
+            decayed[key] = bool(row[i_dec].strip())
+    return decayed
+
+
+def _read_gcat_statuses(path):
+    """Map each NORAD key to the set of Status values across all its phases."""
+    by_obj = {}
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        first = fh.readline()
+        if not first:
+            raise ValueError(f"{path}: empty file")
+        cols = [c.strip() for c in first.rstrip("\r\n").lstrip("#").split("\t")]
+        try:
+            i_sat = cols.index("Satcat")
+            i_st = cols.index("Status")
+        except ValueError as exc:
+            raise ValueError(f"{path}: missing required column ({exc})") from None
+        width = len(cols)
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\r\n").split("\t")
+            if len(fields) < width:
+                continue
+            key = _norad_key(fields[i_sat])
+            if key is None:
+                continue
+            by_obj.setdefault(key, set()).add(fields[i_st].strip())
+    return by_obj
+
+
+def verify_disposition_disagreement(data_dir):
+    decay = _read_celestrak_decay(data_dir / "celestrak_satcat.csv")
+    phases = _read_gcat_statuses(data_dir / "gcat_satcat.tsv")
+
+    flagged = []
+    gone_not_decayed = 0
+    decayed_not_gone = 0
+    for key in sorted(phases.keys() & decay.keys(), key=int):
+        codes = phases[key]
+        gone = not codes.isdisjoint(_VERIFY_TERMINAL)
+        departed = not codes.isdisjoint(_VERIFY_DEPARTED)
+        ct_decayed = decay[key]
+        if gone and not ct_decayed:
+            gone_not_decayed += 1
+            flagged.append(key)
+        elif ct_decayed and not gone and not departed:
+            decayed_not_gone += 1
+            flagged.append(key)
+
+    return {
+        "DispositionDisagreement": len(flagged),
+        "breakdown": {
+            "gcat_gone_celestrak_not_decayed": gone_not_decayed,
+            "celestrak_decayed_gcat_not_gone_not_departed": decayed_not_gone,
+        },
+        "matched_objects": len(phases.keys() & decay.keys()),
+        "sample": flagged[:20],
+    }
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument(
+        "--data-dir",
+        type=pathlib.Path,
+        default=pathlib.Path(__file__).resolve().parent.parent / "data",
+    )
+    ap.add_argument(
+        "--expect",
+        type=int,
+        default=None,
+        help="count from the primary implementation to cross-check against",
+    )
+    args = ap.parse_args(argv)
+
+    try:
+        result = verify_disposition_disagreement(args.data_dir)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 2
+
+    if args.expect is not None:
+        result["expected"] = args.expect
+        result["agree"] = result["DispositionDisagreement"] == args.expect
+    print(json.dumps(result, indent=2))
+    if args.expect is not None and not result["agree"]:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

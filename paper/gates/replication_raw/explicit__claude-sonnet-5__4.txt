@@ -1,0 +1,150 @@
+# ---- pipeline/verify_disposition.py ----
+"""Independent, code-isolated recomputation of DispositionDisagreement.
+
+This module deliberately duplicates domain knowledge from scratch. It does
+NOT import anything from reconcile.py or governance_report.py, and it does
+not reuse any of their constant objects (GONE, LEFT_EARTH, etc.) or parsing
+helpers (load_celestrak, load_gcat). All status-code literals below were
+re-transcribed independently from the GCAT phase-code reference, grouped
+differently, and the file-reading logic uses a different parsing strategy
+(manual header-index lookup instead of csv.DictReader/dict(zip(...))) so
+that a defect in one implementation is unlikely to be mirrored in the other.
+"""
+import csv
+import pathlib
+
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_DATA = _ROOT / "data"
+
+csv.field_size_limit(10_000_000)
+
+# Re-derived independently from planet4589.org/space/gcat/web/intro/phases.html
+_DEPARTED_PHASE_CODES = (
+    "R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN",
+    "AL", "AL IN", "TX",
+)
+_BEYOND_EARTH_PHASE_CODES = (
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+)
+
+
+def _read_celestrak_decay_flags(path):
+    """norad id (normalized, no leading zeros) -> bool decayed."""
+    flags = {}
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            raw_id = row.get("NORAD_CAT_ID", "").strip()
+            if not raw_id:
+                continue
+            try:
+                norm_id = str(int(raw_id))
+            except ValueError:
+                norm_id = raw_id
+            flags[norm_id] = bool(row.get("DECAY_DATE", "").strip())
+    return flags
+
+
+def _read_gcat_phase_codes(path):
+    """norad id -> list of raw Status strings.
+
+    Parsed via manual tab-splitting keyed by header position lookup,
+    deliberately avoiding the dict(zip(hdr, ...)) pattern used elsewhere.
+    """
+    phase_codes = {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        first = fh.readline()
+        header_line = first[1:] if first.startswith("#") else first
+        columns = [c.strip() for c in header_line.rstrip("\n").split("\t")]
+        try:
+            satcat_idx = columns.index("Satcat")
+            status_idx = columns.index("Status")
+        except ValueError:
+            return phase_codes
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) <= max(satcat_idx, status_idx):
+                continue
+            token = fields[satcat_idx].strip()
+            if not token.isdigit():
+                continue
+            norm_id = str(int(token))
+            phase_codes.setdefault(norm_id, []).append(fields[status_idx].strip())
+    return phase_codes
+
+
+def _has_any(codes, allowed):
+    for c in codes:
+        if c in allowed:
+            return True
+    return False
+
+
+def recompute_disposition_disagreement(
+    celestrak_csv=None,
+    gcat_satcat_tsv=None,
+):
+    """Return the DispositionDisagreement count via an independent path."""
+    celestrak_csv = celestrak_csv or (_DATA / "celestrak_satcat.csv")
+    gcat_satcat_tsv = gcat_satcat_tsv or (_DATA / "gcat_satcat.tsv")
+
+    decayed_by_id = _read_celestrak_decay_flags(celestrak_csv)
+    phases_by_id = _read_gcat_phase_codes(gcat_satcat_tsv)
+
+    disagreement_count = 0
+    for norad_id, codes in phases_by_id.items():
+        if norad_id not in decayed_by_id:
+            continue
+
+        marked_decayed = decayed_by_id[norad_id]
+        object_has_departed = _has_any(codes, _DEPARTED_PHASE_CODES)
+        object_left_earth_only = (
+            _has_any(codes, _BEYOND_EARTH_PHASE_CODES) and not object_has_departed
+        )
+
+        disagrees = object_has_departed != marked_decayed
+        excused = marked_decayed and object_left_earth_only
+
+        if disagrees and not excused:
+            disagreement_count += 1
+
+    return disagreement_count
+
+
+if __name__ == "__main__":
+    print(recompute_disposition_disagreement())
+
+
+# ---- pipeline/cross_check_disposition.py ----
+"""Compares the two independent DispositionDisagreement computations and
+fails loudly on any mismatch. Intended to be run as part of the governance
+gate, alongside (not instead of) the SPARQL dual-computation check."""
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from governance_report import python_side
+from verify_disposition import recompute_disposition_disagreement
+
+
+def main():
+    primary = python_side()["DispositionDisagreement"]
+    independent = recompute_disposition_disagreement()
+
+    if primary != independent:
+        print(
+            "CROSS-CHECK FAILURE: DispositionDisagreement mismatch "
+            f"(governance_report={primary!r}, verify_disposition={independent!r})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"DispositionDisagreement cross-check OK: {primary}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

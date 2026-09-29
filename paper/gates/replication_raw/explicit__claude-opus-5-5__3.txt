@@ -1,0 +1,170 @@
+"""Independent verification of the DispositionDisagreement count.
+
+Intentionally shares no code or constants with reconcile.py or
+governance_report.py. The GCAT status taxonomy below was transcribed
+separately from planet4589.org/space/gcat/web/intro/phases.html. Keep it
+maintained separately. If it were copied from reconcile.py, a transcription
+error would be reproduced in both paths and the cross-check would miss it.
+
+Definition being verified, restated from the specification rather than the code:
+  For each object present in both GCAT satcat and CelesTrak SATCAT:
+    gcat_gone  = any GCAT phase status is a terminal "no longer in space" code
+    ct_decayed = CelesTrak DECAY_DATE is non-empty
+    left_earth = any GCAT phase status is an escape/heliocentric/other-body code
+  The object disagrees when gcat_gone != ct_decayed, EXCEPT when
+  ct_decayed and left_earth and not gcat_gone.
+
+Deliberate differences from the primary path, chosen to expose latent bugs:
+  * NORAD IDs from BOTH catalogues are normalised to int. The primary path
+    only normalises GCAT, so zero-padded CelesTrak IDs would silently fail
+    to join there.
+  * Any GCAT status code not in the taxonomy is reported, and fails under
+    --strict. Unclassified codes are not silently ignored.
+  * Malformed GCAT rows are counted and reported, not silently dropped.
+
+Exit codes: 0 = verified (or no comparison requested), 1 = count mismatch,
+2 = unclassified status codes under --strict, 3 = input problem.
+"""
+import argparse
+import csv
+import json
+import pathlib
+import sys
+
+_BASE = pathlib.Path(__file__).resolve().parent.parent / "data"
+
+_TAXONOMY = {
+    "O": "in_space", "AO": "in_space", "AO IN": "in_space", "OX": "in_space",
+    "R": "terminal", "D": "terminal", "L": "terminal", "LF": "terminal",
+    "S": "terminal", "F": "terminal", "AF": "terminal", "AS": "terminal",
+    "AR": "terminal", "AR IN": "terminal", "AL": "terminal", "AL IN": "terminal",
+    "TX": "terminal",
+    "DSO": "escaped", "DSA": "escaped", "DSA IN": "escaped", "EO": "escaped",
+    "EAO": "escaped", "EN": "escaped", "OI": "escaped", "OE": "escaped",
+    "LO": "escaped", "LOA": "escaped",
+    "ERR": "error",
+}
+
+
+def _norm_id(raw):
+    raw = (raw or "").strip()
+    if not raw or not raw.isdigit():
+        return None
+    return int(raw)
+
+
+def read_celestrak(path):
+    decayed, present, dup = set(), set(), 0
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as e:
+            sys.exit(f"celestrak header missing column: {e}") or 3
+        for row in reader:
+            if len(row) <= max(i_id, i_dec):
+                continue
+            nid = _norm_id(row[i_id])
+            if nid is None:
+                continue
+            if nid in present:
+                dup += 1
+            present.add(nid)
+            if row[i_dec].strip():
+                decayed.add(nid)
+    return present, decayed, dup
+
+
+def read_gcat_statuses(path):
+    statuses, malformed, unknown = {}, 0, {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        first = fh.readline()
+        header = [h.strip() for h in first.lstrip("#").rstrip("\r\n").split("\t")]
+        try:
+            i_sat = header.index("Satcat")
+            i_st = header.index("Status")
+        except ValueError as e:
+            print(f"gcat header missing column: {e}", file=sys.stderr)
+            sys.exit(3)
+        width = len(header)
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            cells = line.rstrip("\r\n").split("\t")
+            if len(cells) < width:
+                malformed += 1
+                continue
+            nid = _norm_id(cells[i_sat])
+            if nid is None:
+                continue
+            code = cells[i_st].strip()
+            statuses.setdefault(nid, set()).add(code)
+            if code not in _TAXONOMY:
+                unknown[code] = unknown.get(code, 0) + 1
+    return statuses, malformed, unknown
+
+
+def count_disagreements(ct_present, ct_decayed, gcat_statuses):
+    hits = []
+    for nid, codes in gcat_statuses.items():
+        if nid not in ct_present:
+            continue
+        kinds = {_TAXONOMY.get(c) for c in codes}
+        gone = "terminal" in kinds
+        escaped = "escaped" in kinds
+        decayed = nid in ct_decayed
+        if gone == decayed:
+            continue
+        if decayed and escaped and not gone:
+            continue
+        hits.append(nid)
+    return sorted(hits)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--celestrak", default=str(_BASE / "celestrak_satcat.csv"))
+    ap.add_argument("--gcat", default=str(_BASE / "gcat_satcat.tsv"))
+    ap.add_argument("--expect", type=int, help="count from the primary path to cross-check")
+    ap.add_argument("--strict", action="store_true", help="fail on unclassified GCAT status codes")
+    ap.add_argument("--list", action="store_true", help="include disagreeing NORAD IDs in output")
+    a = ap.parse_args(argv)
+
+    for p in (a.celestrak, a.gcat):
+        if not pathlib.Path(p).is_file():
+            print(f"missing input: {p}", file=sys.stderr)
+            return 3
+
+    ct_present, ct_decayed, ct_dups = read_celestrak(a.celestrak)
+    gstat, malformed, unknown = read_gcat_statuses(a.gcat)
+    hits = count_disagreements(ct_present, ct_decayed, gstat)
+
+    report = {
+        "check": "DispositionDisagreement",
+        "independent_count": len(hits),
+        "expected_count": a.expect,
+        "diagnostics": {
+            "celestrak_objects": len(ct_present),
+            "celestrak_duplicate_ids": ct_dups,
+            "gcat_objects_with_norad": len(gstat),
+            "gcat_malformed_rows_skipped": malformed,
+            "gcat_unclassified_status_codes": unknown,
+        },
+    }
+    if a.list:
+        report["norad_ids"] = hits
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+    if unknown and a.strict:
+        print(f"unclassified GCAT status codes: {sorted(unknown)}", file=sys.stderr)
+        return 2
+    if a.expect is not None and a.expect != len(hits):
+        print(f"MISMATCH: primary={a.expect} independent={len(hits)}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

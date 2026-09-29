@@ -1,0 +1,19 @@
+def verify_disposition_disagreement():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    st = {n: statuses(v) for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    
+    both = set(ct) & set(sat)
+    disagreements = set()
+    
+    for n in both:
+        gcat_status = st[n]
+        has_decay = n in ctdec
+        
+        if gcat_status & GONE and not has_decay:
+            disagreements.add(n)
+        elif gcat_status & INORBIT and has_decay:
+            disagreements.add(n)
+    
+    return len(disagreements)

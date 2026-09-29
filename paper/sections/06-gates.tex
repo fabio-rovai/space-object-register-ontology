@@ -1,0 +1,86 @@
+\section{Three gates, implemented and measured}
+\label{sec:gates}
+
+The checks in Section~\ref{sec:caught} were done by hand, and a discipline that
+depends on someone deciding to look again is not a discipline. We implemented
+all three and ran each on the defective code and on the first correction.
+Constraint-based data validation checks declared expectations about data at
+scale \citep{schelter2018deequ}; these gates instead check the pipeline's reading
+of a vocabulary, which is where the defect lived. The second error gives a test
+the first did not: the gates were built after the first error was known, but the
+second was unknown when they were built, so how they behave on it is closer to a
+prospective measurement. Table~\ref{tab:gates} gives the result.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Each gate on the defective code, and on the first correction, which
+still contained the second error of Section~\ref{sec:second} (42 objects).}
+\label{tab:gates}
+\begin{tabular}{>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{3.9cm}>{\raggedright\arraybackslash}p{5.4cm}}
+\toprule
+Gate & Defective code & First correction, against the second error \\
+\midrule
+Total-function check on the status column &
+\textbf{Fires}: 9 unclassified codes over 1{,}099 rows (\texttt{ATT},
+\texttt{C}, \texttt{DK}, \texttt{E}, \texttt{EVA DP}, \texttt{GRP}, \texttt{N},
+\texttt{REL}, \texttt{TFR}) &
+\textbf{Silent}: 0 unclassified codes. \texttt{E} and \texttt{C} are classified,
+wrongly \\
+\addlinespace
+Residue decomposition &
+\textbf{Shows it}: 20 groups, top 5 hold 729 of 932; 500 pair docking or
+attachment with impact or landing &
+\textbf{Shows it, unread}: 44 of 261 in groups pairing \texttt{E} or \texttt{C}
+with a CelesTrak object in orbit \\
+\addlinespace
+Source inventory reconciliation &
+\textbf{Fires}: \texttt{satcat100k} listed, never fetched &
+\textbf{Silent}: scoped to the four main catalogues; the event catalogue is on
+the same index \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The total-function check tests completeness, not meaning.}
+Requiring every observed status to be assigned to a named category attacks the
+default that did the damage in Section~\ref{sec:mechanism}, and on the defective
+code it lists every code implicated in the error. It cannot tell a right
+assignment from a wrong one. The first correction assigned \texttt{E} and
+\texttt{C} explicitly, to the wrong category, and the check passed. It also has a
+scoping cost: applied to every controlled column rather than the one the
+classifier consumes, it fires identically on both versions on 70,292 rows of
+CelesTrak's orbit type, 70,130 of object type and 1,292 of data status, columns
+the pipeline treats as opaque strings. The scope need not be chosen by hand. The
+names both gate paths import from one module are exactly the definitions the
+gate cannot test (Section~\ref{sec:mechanism}); at the published commit the
+vocabularies among them are all classifications of the GCAT status column, which
+is where the check separates cleanly.
+
+\paragraph{Residue decomposition is an auditing aid, not a verdict.}
+Grouping the unexplained disagreements by the two registers' fields made the
+first error legible, since a status meaning ``joined another object'' should not
+systematically meet a landing in the other register. It made the second error
+legible too: on the corrected code, 30 explosions and 14 collisions sit against
+CelesTrak objects in orbit. We read that table after the correction and saw
+confirmation. The decomposition has no rejection criterion of its own, and the
+reader supplied the wrong one.
+
+\paragraph{Inventory reconciliation is exactly as good as its list.}
+Comparing the files the source lists against the files the harvest loaded found
+the missing fourth catalogue at once, with no false positive. On the second error
+it was silent, because we had scoped it to the section of the index headed as
+the main catalogues, while the index also lists the event catalogue, and eleven
+object catalogues in all. Widening the list would have caught it and would also
+flag files the pipeline has no reason to read. Running this gate also corrected
+our own build report, which said the missing file recovered 280 objects; it
+recovers 278, forced by the 900 and 622 that both reproduce exactly. A pass
+undertaken to correct three published numbers introduced a fourth error.
+
+\paragraph{A check that looked independent and was not.}
+The SHACL validation returned 3{,}564 results, exactly the sum of six of the
+seven counts. At the time this read as corroboration. It is an arithmetic
+identity: the shapes select the nodes the counts count, from the graph the counts
+were computed over, so when the counts were wrong the total was wrong by the same
+amount and still matched. A suite of such steps produces a great deal of green
+while measuring one thing repeatedly.

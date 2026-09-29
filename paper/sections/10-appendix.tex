@@ -1,0 +1,105 @@
+\appendix
+
+\section{Object-level ledger of the disposition count}
+\label{app:ledger}
+
+The unit throughout is an object present in both CelesTrak's catalogue and GCAT's
+main catalogue, keyed by catalogue number (69,390 objects). Two
+distinctions of unit matter when reading the figures below: 998 counted objects
+removed from the comparison, not disagreements, and 500 is the docking and
+attachment subset of the 769, not all of it. Table~\ref{tab:ledger} tracks every
+object through the three versions; \texttt{count\_ledger.py} produces each
+figure and asserts that the arithmetic closes.
+
+\begin{table}[h]
+\centering
+\small
+\caption{The disposition count, object by object. Status groups refer to the
+object's GCAT status code.}
+\label{tab:ledger}
+\begin{tabular}{lr}
+\toprule
+\textbf{Published count} & \textbf{932} \\
+\quad GCAT gone, CelesTrak gives no decay date & 163 \\
+\quad CelesTrak decayed, GCAT not gone & 769 \\
+\qquad docking or attachment (\texttt{DK}, \texttt{ATT}) & 500 \\
+\qquad other transition codes (\texttt{TFR}, \texttt{GRP}, \texttt{N}, \ldots) & 140 \\
+\qquad explosion or collision (\texttt{E}, \texttt{C}) & 57 \\
+\qquad in orbit but tracking lost (\texttt{OX}) & 31 \\
+\qquad error entries (\texttt{ERR}) & 21 \\
+\qquad in orbit (\texttt{O}, \texttt{AO}) & 14 \\
+\qquad gone, but status carries a trailing \texttt{?} & 6 \\
+\midrule
+Left the comparison at the first correction & $-724$ \\
+\quad transition codes now excluded (of 998 objects excluded in all) & $-640$ \\
+\quad explosions and collisions reclassified as destroyed, CelesTrak agrees & $-57$ \\
+\quad error entries now excluded & $-21$ \\
+\quad trailing \texttt{?} now stripped & $-6$ \\
+Entered at the first correction & $+53$ \\
+\quad explosions and collisions reclassified as destroyed, CelesTrak silent & $+44$ \\
+\quad trailing \texttt{?} now stripped & $+9$ \\
+\textbf{First correction} & \textbf{261} \\
+\midrule
+Left at the full-history check: later phase in orbit or unrecorded & $-42$ \\
+\quad explosions & $-30$ \\
+\quad collisions & $-12$ \\
+Entered: attached object whose later phase ends in a deorbit & $+1$ \\
+\textbf{Full-history count} & \textbf{220} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{The full-history check}
+\label{app:history}
+
+\texttt{history\_check.py} appends to each object's record the phases GCAT's
+event catalogue lists for the same identifier, drops the 19 phases that began
+after 18~August~2026, and takes the status of the latest phase. Following GCAT's
+definitions, \texttt{C} counts as destruction only as a last phase; \texttt{E},
+\texttt{N}, \texttt{LEASE} and \texttt{REFLT} as a last phase leave the present
+state unrecorded (28 objects, set aside); docking, grappling, attachment and
+transfer codes resolve through the object named as destination. The three
+catalogue numbers GCAT assigns to two objects each are resolved on both, and
+count only if both agree. The 14 objects whose last phase is a lease are all in
+orbit in CelesTrak, so treating a lease as a free-flying state instead leaves the
+count unchanged.
+
+\texttt{currentcat\_crosscheck.py} repeats the comparison from GCAT's derived
+catalogue of the most recent phase of each object, mapping every status text
+that occurs to a disposition and failing on any it cannot map. Over 69,249
+comparable objects it gives 219, with 208 in common with the 220. The 12 objects
+only in our reading are 9 reentries CelesTrak recorded between 13 and 18~August
+that the frozen GCAT file did not yet carry, 2 collisions with no later phase
+that the derived catalogue now labels as explosions, and 1 record GCAT revised
+after the freeze. The 11 only in the derived reading are 8 deep-space objects,
+which the pipeline sets aside, and 3 reentries GCAT recorded after the freeze.
+Of the 42 objects removed from the first correction, the derived catalogue lists
+40 as in Earth orbit and 2 as exploded; CelesTrak gives none of the 42 a decay
+date.
+
+\input{sections/11-appendix-experiment}
+
+\section{Artifacts}
+\label{app:artifacts}
+
+Code, gate implementations, experiment prompts, raw model outputs, per-trial
+metadata and the behavioural probe are in the project repository at
+\url{https://github.com/fabio-rovai/space-object-register-ontology} under
+\texttt{paper/gates/}. The source files are public and were retrieved on the dates
+below; the SHA-256 prefixes identify the exact copies used.
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+File & Retrieved & SHA-256 (prefix) \\
+\midrule
+CelesTrak \texttt{satcat.csv} & 18 Aug 2026 & \texttt{888f67c53ee3d006} \\
+GCAT \texttt{satcat.tsv} & 18 Aug 2026 & \texttt{33751fb8ac5b6fb1} \\
+GCAT \texttt{auxcat.tsv} & 18 Aug 2026 & \texttt{82363eb712d8a392} \\
+GCAT \texttt{ftocat.tsv} & 18 Aug 2026 & \texttt{d6b6351ceb0a5a98} \\
+GCAT \texttt{satcat100k.tsv} & 18 Aug 2026 & \texttt{6ec65d36db9f6263} \\
+GCAT \texttt{ecat.tsv} (event catalogue) & 29 Sep 2026 & \texttt{39023a287c27326e} \\
+GCAT \texttt{currentcat.tsv} (derived) & 29 Sep 2026 & \texttt{8a0d9285b6fce7b1} \\
+\bottomrule
+\end{tabular}
+\end{center}

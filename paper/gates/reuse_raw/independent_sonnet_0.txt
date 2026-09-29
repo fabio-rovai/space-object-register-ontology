@@ -1,0 +1,43 @@
+# ---- pipeline/verify_disposition.py ----
+from reconcile import load_celestrak, load_gcat, GONE, INORBIT, LEFT_EARTH, ERROR, LOST, statuses
+
+
+def python_side_independent():
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+
+    disagreements = 0
+    for norad in set(ct) & set(sat):
+        gcat_statuses = statuses(sat[norad])
+        celestrak_decayed = bool(ct[norad]["DECAY_DATE"].strip())
+        gcat_gone = bool(gcat_statuses & GONE)
+        gcat_inorbit = bool(gcat_statuses & INORBIT)
+
+        disagreement = (gcat_gone and not celestrak_decayed) or (gcat_inorbit and celestrak_decayed)
+        if disagreement:
+            disagreements += 1
+
+    return {"DispositionDisagreement": disagreements}
+
+
+def cross_check():
+    from governance_report import python_side
+
+    original = python_side()["DispositionDisagreement"]
+    independent = python_side_independent()["DispositionDisagreement"]
+
+    return {
+        "original": original,
+        "independent": independent,
+        "match": original == independent,
+    }
+
+
+if __name__ == "__main__":
+    result = cross_check()
+    if not result["match"]:
+        raise SystemExit(
+            f"DispositionDisagreement mismatch: original={result['original']} "
+            f"independent={result['independent']}"
+        )
+    print(f"DispositionDisagreement verified: {result['original']}")

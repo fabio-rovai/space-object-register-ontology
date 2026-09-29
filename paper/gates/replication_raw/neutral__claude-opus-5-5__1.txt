@@ -1,0 +1,157 @@
+# ---- pipeline/governance_report.py (additions) ----
+# Independent second path for DispositionDisagreement.
+#
+# Shares only the status-code vocabularies with python_side(), because those
+# are the published GCAT spec. File parsing, identifier normalisation, and the
+# disagreement logic are reimplemented here so a bug in load_gcat,
+# load_celestrak, or the set expression in python_side() will surface as a
+# count mismatch instead of being reproduced.
+
+import csv
+import re
+
+_DIGITS = re.compile(r"^\d+$")
+
+
+def _norm_id(raw):
+    """Canonical NORAD id. Normalises both catalogues identically, so a leading-zero
+    or whitespace mismatch between sources shows up as a cross-check failure."""
+    s = (raw or "").strip()
+    return str(int(s)) if _DIGITS.match(s) else None
+
+
+def _read_celestrak_decay():
+    """Return (all_ids, decayed_ids, unparseable_id_count) from CelesTrak SATCAT."""
+    all_ids, decayed, bad = set(), set(), 0
+    path = ROOT / "data" / "celestrak_satcat.csv"
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as e:
+            raise RuntimeError(f"CelesTrak header missing expected column: {e}")
+        for row in reader:
+            if len(row) <= max(i_id, i_dec):
+                bad += 1
+                continue
+            nid = _norm_id(row[i_id])
+            if nid is None:
+                bad += 1
+                continue
+            all_ids.add(nid)
+            if row[i_dec].strip():
+                decayed.add(nid)
+    return all_ids, decayed, bad
+
+
+def _read_gcat_statuses(name):
+    """Return ({norad: set(status)}, short_row_count) from a GCAT TSV."""
+    status_by_id = collections.defaultdict(set)
+    short = 0
+    path = ROOT / "data" / name
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+        header = None
+        for row in reader:
+            if not row:
+                continue
+            if header is None:
+                first = row[0].lstrip("#")
+                header = [first.strip()] + [h.strip() for h in row[1:]]
+                i_sat = header.index("Satcat")
+                i_st = header.index("Status")
+                width = len(header)
+                continue
+            if row[0].startswith("#"):
+                continue
+            if len(row) < width:
+                short += 1
+                continue
+            nid = _norm_id(row[i_sat])
+            if nid is None:
+                continue
+            status_by_id[nid].add(row[i_st].strip())
+    if header is None:
+        raise RuntimeError(f"{name}: no header row found")
+    return status_by_id, short
+
+
+def disposition_disagreement_second_path():
+    """Recompute DispositionDisagreement as an explicit per-object truth table.
+
+    For each object present in both GCAT satcat and CelesTrak:
+      gcat_gone   = any phase status in GONE
+      gcat_left   = any phase status in LEFT_EARTH
+      ct_decayed  = CelesTrak DECAY_DATE non-empty
+
+      gcat_gone and not ct_decayed                     -> disagreement (A)
+      not gcat_gone and ct_decayed and not gcat_left   -> disagreement (B)
+      not gcat_gone and ct_decayed and gcat_left       -> excused (escaped Earth)
+      otherwise                                        -> agreement
+    """
+    ct_ids, ct_decayed, ct_bad = _read_celestrak_decay()
+    gcat, gcat_short = _read_gcat_statuses("gcat_satcat.tsv")
+
+    gone_not_decayed = set()
+    decayed_not_gone = set()
+    excused_left_earth = set()
+
+    for nid, sts in gcat.items():
+        if nid not in ct_ids:
+            continue
+        gcat_gone = not sts.isdisjoint(GONE)
+        gcat_left = not sts.isdisjoint(LEFT_EARTH)
+        ct_dec = nid in ct_decayed
+
+        if gcat_gone and not ct_dec:
+            gone_not_decayed.add(nid)
+        elif not gcat_gone and ct_dec:
+            if gcat_left:
+                excused_left_earth.add(nid)
+            else:
+                decayed_not_gone.add(nid)
+
+    return {
+        "count": len(gone_not_decayed) + len(decayed_not_gone),
+        "gcat_gone_ct_not_decayed": gone_not_decayed,
+        "ct_decayed_gcat_not_gone": decayed_not_gone,
+        "excused_left_earth": excused_left_earth,
+        "diagnostics": {
+            "celestrak_unparseable_rows": ct_bad,
+            "gcat_short_rows_skipped": gcat_short,
+            "joined_objects": len(ct_ids & set(gcat)),
+        },
+    }
+
+
+def check_disposition_disagreement(primary=None):
+    """Compare python_side() against the second path. Returns True on agreement."""
+    if primary is None:
+        primary = python_side()["DispositionDisagreement"]
+    second = disposition_disagreement_second_path()
+    ok = primary == second["count"]
+    d = second["diagnostics"]
+    print(
+        f"DispositionDisagreement: primary={primary} second={second['count']} "
+        f"[A gone/not-decayed={len(second['gcat_gone_ct_not_decayed'])}, "
+        f"B decayed/not-gone={len(second['ct_decayed_gcat_not_gone'])}, "
+        f"excused={len(second['excused_left_earth'])}, "
+        f"joined={d['joined_objects']}, "
+        f"ct_bad={d['celestrak_unparseable_rows']}, "
+        f"gcat_short={d['gcat_short_rows_skipped']}] "
+        f"{'OK' if ok else 'MISMATCH'}",
+        file=sys.stderr,
+    )
+    if not ok:
+        sample = sorted(
+            second["gcat_gone_ct_not_decayed"] | second["ct_decayed_gcat_not_gone"],
+            key=int,
+        )[:20]
+        print(f"  second-path sample ids: {sample}", file=sys.stderr)
+    return ok
+
+
+if __name__ == "__main__" and "--check-disposition" in sys.argv:
+    sys.exit(0 if check_disposition_disagreement() else 1)

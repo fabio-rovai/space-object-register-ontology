@@ -1,0 +1,95 @@
+import sys
+
+def classify_gcat_status(status):
+    """Independent, hand-re-derived classifier for a single GCAT status code.
+
+    This intentionally does NOT import GONE / LEFT_EARTH / ERROR from
+    reconcile.py. It re-encodes the same published taxonomy from the GCAT
+    phase/status documentation from scratch, so that a typo or omission in
+    the shared module-level constants cannot silently pass unnoticed by both
+    computations of DispositionDisagreement.
+    """
+    s = status.strip().upper()
+    gone_codes = {
+        "R", "D", "L", "LF", "S", "F", "AF",
+        "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+    }
+    inorbit_codes = {"O", "AO", "AO IN", "OX"}
+    left_earth_codes = {
+        "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+    }
+    error_codes = {"ERR"}
+    if s in gone_codes:
+        return "gone"
+    if s in inorbit_codes:
+        return "inorbit"
+    if s in left_earth_codes:
+        return "left_earth"
+    if s in error_codes:
+        return "error"
+    return "other"
+
+
+def disposition_disagreement_independent(ct, sat):
+    """Recompute DispositionDisagreement by walking each object's phases
+    one at a time, with its own local boolean bookkeeping, instead of via
+    set intersections against module-level constants.
+
+    ct  -- mapping NORAD id -> CelesTrak SATCAT row (from load_celestrak())
+    sat -- mapping NORAD id -> list of GCAT phase rows (from load_gcat())
+
+    This shares only the raw parsed input rows with governance_report's
+    python_side(); the classification and comparison logic are written
+    independently so the two paths can cross-check one another.
+    """
+    mismatches = 0
+    for norad, phases in sat.items():
+        row = ct.get(norad)
+        if row is None:
+            continue
+
+        has_gone_phase = False
+        has_left_earth_phase = False
+        for phase in phases:
+            category = classify_gcat_status(phase.get("Status", ""))
+            if category == "gone":
+                has_gone_phase = True
+            elif category == "left_earth":
+                has_left_earth_phase = True
+
+        decay_field = row.get("DECAY_DATE", "")
+        celestrak_says_decayed = decay_field.strip() != ""
+
+        raw_disagreement = has_gone_phase != celestrak_says_decayed
+
+        # Same carve-out as python_side(), re-expressed with plain booleans:
+        # an object CelesTrak marks decayed, that never registered a GCAT
+        # "gone" phase, but that did leave Earth orbit (deep-space departure,
+        # lunar/planetary transfer, etc.), is not a genuine disagreement.
+        left_earth_exemption = (
+            celestrak_says_decayed
+            and has_left_earth_phase
+            and not has_gone_phase
+        )
+
+        if raw_disagreement and not left_earth_exemption:
+            mismatches += 1
+
+    return mismatches
+
+
+def verify_disposition_disagreement(primary_value, ct, sat):
+    """Cross-check the headline DispositionDisagreement figure against the
+    independent per-object recomputation. Exits non-zero on disagreement,
+    matching this pipeline's fail-closed governance posture.
+    """
+    independent_value = disposition_disagreement_independent(ct, sat)
+    if primary_value != independent_value:
+        print(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement mismatch "
+            f"between primary computation ({primary_value}) and independent "
+            f"per-object verification ({independent_value}).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return independent_value

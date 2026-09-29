@@ -1,0 +1,81 @@
+\documentclass{article}
+
+% Camera-ready and arXiv version: accepted, de-anonymised.
+\usepackage[final,dblblindworkshop]{neurips_2026}
+\workshoptitle{AI for Science: Verification in the Age of AI Scientists}
+
+% The CFP asks for this exact footnote on the accepted version.
+\makeatletter
+\renewcommand{\@noticestring}{%
+  Accepted at the AI for Science workshop (NeurIPS 2026).%
+}
+\makeatother
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{microtype}
+\usepackage{xcolor}
+
+
+
+\title{Independent Verification Paths Are Not Independent:\\
+       A Case Study of Common-Mode Failure\\ in a Satellite Catalogue Pipeline}
+
+\author{Fabio Rovai\\
+  The Tesseract Academy\\
+  London, United Kingdom\\
+  \texttt{fabio@thetesseractacademy.com}}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+A common safeguard for a data pipeline is redundant computation: derive each
+published number by two routes built on different technology and refuse to exit
+when they disagree. We report one such gate failing, in a cross-catalogue
+integrity study of two open registers of Earth-orbiting objects. A gate
+comparing a set-based Python path with SPARQL queries over the emitted RDF graph
+printed \texttt{ALL CROSS-CHECKS AGREE} on seven counts. Three were wrong, one
+overstated more than fourfold (932 against 220). Both paths imported the same
+constants, which encoded a misreading of the source's status vocabulary, so the
+error was common-mode and the gate could not see it. We give the mechanism, an
+object-level ledger reconciling every figure, and three checks that go back to
+the source's documentation, measured on the defective code and on its
+correction. We then checked that correction against each object's phase
+history, held in a source file the pipeline never read. The correction was also wrong: 42 of its 261 disagreements are
+artefacts, and none of our three checks flagged them. Finally, in a controlled
+replication with three pinned models and tools disabled, 72 of 75 paths
+generated on request as independent checks computed the defective count, 29 of
+30 even when the prompt carried the source's own definitions of the codes. The evidence is one pipeline and one
+defect family. Within it, redundancy verified implementation, and the errors
+that reached publication were errors of meaning.
+\end{abstract}
+
+\input{sections/01-introduction}
+\input{sections/02-setting}
+\input{sections/03-failure}
+\input{sections/04-mechanism}
+\input{sections/05-what-caught-it}
+\input{sections/06-gates}
+\input{sections/07-automation}
+\input{sections/08-limitations}
+\input{sections/09-conclusion}
+
+\begin{ack}
+We thank the anonymous reviewers and the area chair for their comments, and
+Jonathan McDowell for maintaining GCAT and documenting it as thoroughly as he does.
+\end{ack}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\input{sections/10-appendix}
+
+\end{document}

@@ -1,0 +1,197 @@
+"""Independent second path for the DispositionDisagreement count.
+
+The existing gate (governance_report.python_side) derives this count from
+reconcile.load_celestrak / reconcile.load_gcat and reconcile's status-code
+sets, using a single set comprehension. This module deliberately shares none
+of that code:
+
+  * Its own file readers: csv.reader with explicit dialects instead of
+    str.split / DictReader, and its own NORAD-ID normalisation on both sides.
+  * Its own transcription of the GCAT status-code tables. It does not import
+    reconcile's constants. A transcription error on either side therefore
+    surfaces as a mismatch instead of silently agreeing with itself.
+  * An explicit per-object decision table instead of a boolean XOR
+    expression, with a per-branch breakdown so a mismatch can be localised.
+
+The one input still shared is the rule itself: GCAT "gone" disagreeing with
+CelesTrak "decayed", except where CelesTrak shows a decay date and GCAT says
+the object left Earth orbit without re-entering.
+
+CAVEAT: the status tables below were transcribed from the same rule the
+original encodes. For full independence, someone other than the author of
+reconcile.py should re-derive them from
+planet4589.org/space/gcat/web/intro/phases.html and confirm them.
+
+Exit codes: 0 = counts agree, 1 = counts disagree, 2 = input/usage error.
+"""
+import argparse
+import csv
+import datetime
+import json
+import pathlib
+import re
+import sys
+
+csv.field_size_limit(10_000_000)
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Independently transcribed GCAT phase status codes.
+V_REENTERED_OR_ENDED = frozenset({
+    "R", "D", "L", "LF", "S", "F",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+})
+V_DEPARTED_EARTH_ORBIT = frozenset({
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+})
+
+_DIGITS = re.compile(r"[0-9]+")
+
+
+def _norm_id(raw):
+    """Canonical NORAD id: ASCII digits only, leading zeros removed. None if not numeric."""
+    s = (raw or "").strip()
+    if not _DIGITS.fullmatch(s):
+        return None
+    return str(int(s))
+
+
+def read_celestrak(path):
+    """Return ({norad: decayed_bool}, diagnostics)."""
+    decayed = {}
+    diag = {"rows": 0, "non_numeric_id": 0, "duplicate_id": 0,
+            "id_needed_normalisation": 0, "unparseable_decay_date": 0}
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        reader = csv.reader(f)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as e:
+            raise SystemExit(f"celestrak header missing column: {e}") from None
+        for row in reader:
+            if not row:
+                continue
+            diag["rows"] += 1
+            raw = row[i_id] if i_id < len(row) else ""
+            nid = _norm_id(raw)
+            if nid is None:
+                diag["non_numeric_id"] += 1
+                continue
+            if nid != raw.strip():
+                diag["id_needed_normalisation"] += 1
+            dec = (row[i_dec] if i_dec < len(row) else "").strip()
+            if dec:
+                try:
+                    datetime.date.fromisoformat(dec[:10])
+                except ValueError:
+                    diag["unparseable_decay_date"] += 1
+            if nid in decayed:
+                diag["duplicate_id"] += 1
+            # Last row wins, the same policy as a dict keyed on id.
+            decayed[nid] = bool(dec)
+    return decayed, diag
+
+
+def read_gcat_statuses(path):
+    """Return ({norad: set(status codes over all phases)}, diagnostics)."""
+    by_id = {}
+    diag = {"rows": 0, "comment_rows": 0, "short_rows": 0, "unnumbered_rows": 0}
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+        first = next(reader)
+        if first:
+            first[0] = first[0].lstrip("#")
+        header = [h.strip() for h in first]
+        try:
+            i_sat = header.index("Satcat")
+            i_st = header.index("Status")
+        except ValueError as e:
+            raise SystemExit(f"{path.name} header missing column: {e}") from None
+        width = len(header)
+        for row in reader:
+            if row and row[0].startswith("#"):
+                diag["comment_rows"] += 1
+                continue
+            if len(row) < width:
+                # Truncated rows are excluded; they are counted so a policy
+                # difference shows up in the diagnostics.
+                diag["short_rows"] += 1
+                continue
+            diag["rows"] += 1
+            nid = _norm_id(row[i_sat])
+            if nid is None:
+                diag["unnumbered_rows"] += 1
+                continue
+            by_id.setdefault(nid, set()).add(row[i_st].strip())
+    return by_id, diag
+
+
+def classify(gcat_codes, ct_decayed):
+    """Decision table for a single object present in both catalogues."""
+    gcat_gone = not gcat_codes.isdisjoint(V_REENTERED_OR_ENDED)
+    gcat_departed = not gcat_codes.isdisjoint(V_DEPARTED_EARTH_ORBIT)
+    if gcat_gone and ct_decayed:
+        return "agree_gone"
+    if not gcat_gone and not ct_decayed:
+        return "agree_present"
+    if gcat_gone and not ct_decayed:
+        return "disagree_gcat_gone_celestrak_present"
+    # ct_decayed and not gcat_gone
+    if gcat_departed:
+        return "exempt_departed_earth_orbit"
+    return "disagree_celestrak_decayed_gcat_present"
+
+
+def independent_disposition_disagreement(data_dir=DATA):
+    ct, ct_diag = read_celestrak(data_dir / "celestrak_satcat.csv")
+    gs, g_diag = read_gcat_statuses(data_dir / "gcat_satcat.tsv")
+    buckets = {}
+    members = {}
+    for nid in sorted(set(ct) & set(gs), key=int):
+        k = classify(gs[nid], ct[nid])
+        buckets[k] = buckets.get(k, 0) + 1
+        members.setdefault(k, []).append(nid)
+    total = sum(v for k, v in buckets.items() if k.startswith("disagree_"))
+    return {
+        "DispositionDisagreement": total,
+        "breakdown": dict(sorted(buckets.items())),
+        "overlap": len(set(ct) & set(gs)),
+        "diagnostics": {"celestrak": ct_diag, "gcat_satcat": g_diag},
+        "sample_ids": {k: v[:10] for k, v in members.items() if k.startswith("disagree_")},
+    }
+
+
+def _primary_count():
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+    return python_side()["DispositionDisagreement"]
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--expected", type=int,
+                    help="compare against this value instead of calling governance_report.python_side()")
+    ap.add_argument("--data-dir", type=pathlib.Path, default=DATA)
+    args = ap.parse_args(argv)
+
+    try:
+        result = independent_disposition_disagreement(args.data_dir)
+    except (OSError, StopIteration) as e:
+        print(f"input error: {e}", file=sys.stderr)
+        return 2
+
+    expected = args.expected if args.expected is not None else _primary_count()
+    ok = result["DispositionDisagreement"] == expected
+    result["primary"] = expected
+    result["match"] = ok
+    print(json.dumps(result, indent=2))
+    if not ok:
+        print(f"MISMATCH DispositionDisagreement: primary={expected} "
+              f"independent={result['DispositionDisagreement']}", file=sys.stderr)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

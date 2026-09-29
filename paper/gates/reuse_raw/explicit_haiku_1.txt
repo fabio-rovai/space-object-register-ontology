@@ -1,0 +1,36 @@
+```python
+def independent_verification():
+    """Independent verification path for DispositionDisagreement."""
+    import csv
+    
+    # Load celestrak independently
+    ct_data = {}
+    with open("data/celestrak_satcat.csv") as f:
+        for row in csv.DictReader(f):
+            norad = row.get("NORAD_CAT_ID", "").strip()
+            if norad:
+                ct_data[norad] = row
+    
+    # Load gcat independently
+    gcat_data = {}
+    with open("data/gcat_satcat.tsv") as f:
+        for row in csv.DictReader(f, delimiter="\t"):
+            norad = row.get("NORAD_ID", "").strip()
+            if norad:
+                gcat_data.setdefault(norad, []).append(row)
+    
+    # Status categories (independently defined)
+    decommissioned = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    operational = {"O", "AO", "AO IN", "OX"}
+    
+    # Compute disagreements
+    count = 0
+    for norad in set(ct_data) & set(gcat_data):
+        statuses = {row.get("Status", "").strip() for row in gcat_data[norad]} - {""}
+        has_decay = bool(ct_data[norad].get("DECAY_DATE", "").strip())
+        
+        if (statuses & decommissioned and not has_decay) or (statuses & operational and has_decay):
+            count += 1
+    
+    return {"DispositionDisagreement": count}
+```

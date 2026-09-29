@@ -1,0 +1,296 @@
+"""Independent second verification path for the DispositionDisagreement count.
+
+This module recomputes DispositionDisagreement without importing anything from
+reconcile.py or governance_report.py for the computation itself. It has its
+own file readers, its own NORAD normalisation, and its own status tables. The
+status tables are re-derived from the GCAT 'Phases and Status Values' page
+(release 1.8.8, retrieved 2026-09-29). The primary implementation is imported
+only at the very end, to compare results.
+
+Definition under test (restated from governance_report.python_side):
+    An object is counted if it appears in both CelesTrak SATCAT and GCAT satcat,
+    AND  (GCAT says "gone")  !=  (CelesTrak has a DECAY_DATE),
+    EXCEPT when CelesTrak has a decay date and GCAT says the object left Earth
+    without being "gone".
+
+Two variants are computed with the independent tables:
+    anyphase : a status counts if it appears on ANY phase of the object.
+               This is the primary's semantics, and it is the gated value.
+    terminal : only the status of the object's FINAL phase counts. The GCAT
+               documentation says the Status "describes the status of the object
+               at the end of the phase", so the final phase gives the current
+               disposition. This variant is reported as advisory only, so that
+               definitional drift becomes visible.
+
+Exit codes:
+    0  independent anyphase count equals the primary count
+    1  mismatch
+    2  input or data-integrity problem
+"""
+import csv
+import json
+import pathlib
+import sys
+import collections
+
+csv.field_size_limit(10_000_000)
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# ---------------------------------------------------------------------------
+# Status tables, derived independently from the GCAT documentation.
+# ---------------------------------------------------------------------------
+
+# Section "Dest is a location on C, or C itself, or blank": the object ceased
+# to exist as an orbiting object around its central body C at t2 (destroyed in
+# the atmosphere, landed, crashed, failed, or ended operations on the surface).
+DOC_ENDED_AT_CENTRAL_BODY = {
+    "S",       # targeted suborbital entry/impact
+    "R",       # reentered, natural decay
+    "D",       # deorbited, active
+    "L",       # landed / splashed down
+    "LF",      # failed landing
+    "AS",      # suborbital reentered attached
+    "AR",      # reentered attached
+    "AR IN",   # reentered inside
+    "AL",      # landed attached
+    "AL IN",   # landed inside
+    "TX",      # transmission ended, on C's surface
+    "F",       # failed during launch failure
+    "AF",      # failed attached
+}
+
+# Sections "Dest is a JCAT from D catalog" and "Dest is a body name", plus
+# lift-off from a non-Earth world: the object left the Earth-orbit regime
+# without being destroyed there.
+DOC_LEFT_CENTRAL_BODY = {
+    "DSO", "DSA", "DSA IN",   # passed deep space boundary
+    "LO", "LOA",              # lift-off from a world other than Earth
+    "EO", "EAO", "EN",        # escape / encounter
+    "OI", "OE",               # orbit insertion / orbit escape
+}
+
+# Still in orbit (free or attached), including "probably in orbit but lost".
+DOC_IN_ORBIT = {"O", "AO", "AO IN", "OX"}
+
+# Intermediate transitions: the object continues in a later phase.
+DOC_TRANSITIONAL = {
+    "UDK", "REL", "DEP", "TO", "TOA", "E", "N", "NA", "LEASE",
+    "DK", "GRP", "ATT", "TFR", "TFR E", "TFR IN", "C",
+    "EVA DP", "EVA RP", "REFLT",
+}
+
+# Special case: no real object behind the entry.
+DOC_ERROR = {"ERR"}
+
+DOC_ALL = (
+    DOC_ENDED_AT_CENTRAL_BODY
+    | DOC_LEFT_CENTRAL_BODY
+    | DOC_IN_ORBIT
+    | DOC_TRANSITIONAL
+    | DOC_ERROR
+)
+
+
+# ---------------------------------------------------------------------------
+# Independent readers
+# ---------------------------------------------------------------------------
+
+def norm_norad(value):
+    """Normalise a NORAD ID to a canonical decimal string, or return None.
+
+    Both sources go through int(), so zero-padded IDs such as '00005' and
+    unpadded IDs such as '5' join correctly.
+    """
+    s = (value or "").strip()
+    if not s.isdigit():
+        return None
+    return str(int(s))
+
+
+def read_celestrak(path):
+    """Return {norad: has_decay_date} and a dict of integrity counters."""
+    out = {}
+    stats = collections.Counter()
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.DictReader(f)
+        missing = {"NORAD_CAT_ID", "DECAY_DATE"} - set(reader.fieldnames or [])
+        if missing:
+            raise SystemExit(f"[verify] CelesTrak file missing columns: {sorted(missing)}")
+        for row in reader:
+            stats["rows"] += 1
+            n = norm_norad(row.get("NORAD_CAT_ID"))
+            if n is None:
+                stats["bad_norad"] += 1
+                continue
+            if n in out:
+                stats["duplicate_norad"] += 1
+            decayed = bool((row.get("DECAY_DATE") or "").strip())
+            # Last row wins, which mirrors the primary's dict overwrite.
+            out[n] = decayed
+            if decayed and (row.get("OPS_STATUS_CODE") or "").strip() not in ("D", ""):
+                stats["decay_date_but_ops_status_not_D"] += 1
+    return out, stats
+
+
+def read_gcat(path):
+    """Return {norad: [phase dicts in file order]} and integrity counters.
+
+    The header line is located explicitly (the first '#' line that names the
+    Satcat column), rather than assumed to be the first line of the file. Short
+    rows are padded and counted instead of silently dropped.
+    """
+    phases = collections.defaultdict(list)
+    stats = collections.Counter()
+    header = None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for idx, raw in enumerate(f):
+            line = raw.rstrip("\r\n")
+            if line.startswith("#"):
+                if header is None:
+                    cand = [h.strip() for h in line.lstrip("#").split("\t")]
+                    if "Satcat" in cand and "Status" in cand:
+                        header = cand
+                continue
+            if header is None or not line.strip():
+                continue
+            parts = [p.strip() for p in line.split("\t")]
+            if len(parts) < len(header):
+                stats["short_rows_padded"] += 1
+                parts += [""] * (len(header) - len(parts))
+            row = dict(zip(header, parts))
+            row["_order"] = idx
+            stats["rows"] += 1
+            n = norm_norad(row.get("Satcat"))
+            if n is None:
+                stats["no_norad"] += 1
+                continue
+            phases[n].append(row)
+    if header is None:
+        raise SystemExit(f"[verify] No usable header found in {path}")
+    return phases, stats
+
+
+# ---------------------------------------------------------------------------
+# Classification
+# ---------------------------------------------------------------------------
+
+def classify(status_set):
+    """Return (gone, left_earth, unknown_statuses) for a set of status codes."""
+    gone = bool(status_set & DOC_ENDED_AT_CENTRAL_BODY)
+    left = bool(status_set & DOC_LEFT_CENTRAL_BODY)
+    unknown = {s for s in status_set if s not in DOC_ALL}
+    return gone, left, unknown
+
+
+def is_disagreement(gone, left, ct_decayed):
+    if gone == ct_decayed:
+        return False
+    if ct_decayed and left and not gone:
+        return False
+    return True
+
+
+def compute(celestrak, gcat_sat):
+    any_hits, term_hits = set(), set()
+    unknown = collections.Counter()
+    for n, phases in gcat_sat.items():
+        if n not in celestrak:
+            continue
+        decayed = celestrak[n]
+
+        # Variant 1: any-phase (the gated value).
+        all_status = {p.get("Status", "").strip() for p in phases}
+        g, l, u = classify(all_status)
+        for s in u:
+            unknown[s] += 1
+        if is_disagreement(g, l, decayed):
+            any_hits.add(n)
+
+        # Variant 2: terminal phase only. GCAT lists phases in chronological
+        # order, so file order is used as the phase order.
+        last = max(phases, key=lambda p: p["_order"])
+        last_status = {last.get("Status", "").strip()}
+        g2, l2, _ = classify(last_status)
+        # Leaving Earth is sticky: once any phase left Earth, a later terminal
+        # event (e.g. landing on the Moon) is not an Earth-orbit state.
+        if all_status & DOC_LEFT_CENTRAL_BODY:
+            l2 = True
+        if is_disagreement(g2, l2, decayed):
+            term_hits.add(n)
+    return any_hits, term_hits, unknown
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    celestrak, ct_stats = read_celestrak(DATA / "celestrak_satcat.csv")
+    gcat_sat, g_stats = read_gcat(DATA / "gcat_satcat.tsv")
+
+    any_hits, term_hits, unknown = compute(celestrak, gcat_sat)
+
+    # Comparison only: the primary is imported here, after the independent
+    # computation has finished.
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    try:
+        from governance_report import python_side
+        primary = python_side()["DispositionDisagreement"]
+    except Exception as exc:  # the primary is not trusted to run
+        primary = None
+        primary_err = repr(exc)
+    else:
+        primary_err = None
+
+    report = {
+        "metric": "DispositionDisagreement",
+        "independent_anyphase": len(any_hits),
+        "independent_terminal_advisory": len(term_hits),
+        "primary": primary,
+        "primary_error": primary_err,
+        "match": primary is not None and primary == len(any_hits),
+        "anyphase_vs_terminal_only_in_anyphase": sorted(any_hits - term_hits, key=int)[:50],
+        "anyphase_vs_terminal_only_in_terminal": sorted(term_hits - any_hits, key=int)[:50],
+        "unknown_status_codes": dict(unknown),
+        "integrity": {
+            "celestrak": dict(ct_stats),
+            "gcat_satcat": dict(g_stats),
+        },
+        "status_table_source": (
+            "planet4589.org/space/gcat/web/intro/phases.html, "
+            "GCAT 1.8.8, retrieved 2026-09-29"
+        ),
+    }
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+    if unknown or ct_stats.get("bad_norad") or g_stats.get("short_rows_padded"):
+        print(
+            "[verify] WARNING: data-integrity issues found (see 'integrity' and "
+            "'unknown_status_codes'); results may differ from the primary for "
+            "these reasons.",
+            file=sys.stderr,
+        )
+    if primary is None:
+        print(f"[verify] primary computation failed: {primary_err}", file=sys.stderr)
+        sys.exit(2)
+    if primary != len(any_hits):
+        print(
+            f"[verify] MISMATCH: primary={primary} "
+            f"independent={len(any_hits)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if len(term_hits) != len(any_hits):
+        print(
+            f"[verify] NOTE: terminal-phase semantics give {len(term_hits)} "
+            f"vs any-phase {len(any_hits)}; review whether the any-phase "
+            f"definition is intended.",
+            file=sys.stderr,
+        )
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

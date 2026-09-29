@@ -1,0 +1,36 @@
+```python
+def verify_disposition_disagreement(ct, sat, st, ctdec, both, gone, inorb):
+    """
+    Verification path to recompute DispositionDisagreement count.
+    Alternative implementation for cross-checking main computation.
+    """
+    count = 0
+    
+    for norad in both:
+        has_decay_in_ct = norad in ctdec
+        is_gone_in_gcat = norad in gone
+        is_inorbit_in_gcat = norad in inorb
+        
+        if (is_gone_in_gcat and not has_decay_in_ct) or (is_inorbit_in_gcat and has_decay_in_ct):
+            count += 1
+    
+    return count
+
+
+def python_side_verified():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    st = {n: statuses(v) for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    both = set(ct) & set(sat)
+    gone = {n for n in both if st[n] & GONE}
+    inorb = {n for n in both if st[n] & INORBIT}
+    
+    primary_count = len((gone - ctdec) | (inorb & ctdec))
+    verification_count = verify_disposition_disagreement(ct, sat, st, ctdec, both, gone, inorb)
+    
+    assert primary_count == verification_count, \
+        f"DispositionDisagreement count mismatch: {primary_count} vs {verification_count}"
+    
+    return {"DispositionDisagreement": primary_count}
+```

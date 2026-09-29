@@ -1,0 +1,82 @@
+{
+  "resolved_models": [
+    "claude-haiku-4-5-20251001",
+    "claude-opus-5-5"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 4097,
+      "outputTokens": 16,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.004177,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-opus-5-5": {
+      "inputTokens": 2,
+      "outputTokens": 4142,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 4790,
+      "webSearchRequests": 0,
+      "costUSD": 0.121168,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinkingTokens": 1730,
+      "canonicalModel": "claude-opus-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "num_turns": 1,
+  "is_error": false,
+  "stop_reason": "end_turn",
+  "permission_denials": [],
+  "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 4790,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 4142,
+    "output_tokens_details": {
+      "thinking_tokens": 1730
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 4790,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 4142,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 4790,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 4790
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "cost_usd": 0.12534499999999998,
+  "seconds": 42.3,
+  "cli_version": "2.1.284",
+  "harness": "claude CLI --print, --tools '' (no tools), --system-prompt, --setting-sources '' , --strict-mcp-config, empty cwd; sampling parameters not exposed by the CLI, left at defaults",
+  "condition": "docs_explicit",
+  "model_requested": "claude-opus-5-5",
+  "trial": 1,
+  "prompt_chars": 10208,
+  "docs_in_prompt": true
+}

@@ -1,0 +1,161 @@
+import csv, json, re, sys, collections, pathlib
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+GONE = {"R","D","L","LF","S","F","AF","AS","AR","AR IN","AL","AL IN","TX"}
+INORBIT = {"O","AO","AO IN","OX"}
+LEFT_EARTH = {"DSO","DSA","DSA IN","EO","EAO","EN","OI","OE","LO","LOA"}
+ERROR = {"ERR"}
+LOST = {"OX"}
+
+def load_celestrak():
+    out = {}
+    with open(DATA/"celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for r in csv.DictReader(f):
+            out[r["NORAD_CAT_ID"].strip()] = r
+    return out
+
+def load_gcat(name):
+    """Return (phases_by_norad, all_rows, no_norad_rows)."""
+    by_norad = collections.defaultdict(list)
+    rows, nona = [], []
+    with open(DATA/name, encoding="utf-8", errors="replace") as f:
+        hdr = [h.strip() for h in f.readline().lstrip("#").rstrip("\n").split("\t")]
+        for line in f:
+            if line.startswith("#"):
+                continue
+            p = line.rstrip("\n").split("\t")
+            if len(p) < len(hdr):
+                continue
+            r = dict(zip(hdr, [x.strip() for x in p]))
+            rows.append(r)
+            s = r.get("Satcat", "")
+            if s.isdigit():
+                by_norad[str(int(s))].append(r)
+            else:
+                nona.append(r)
+    return by_norad, rows, nona
+
+def statuses(phases):
+    return {p.get("Status","").strip() for p in phases}
+
+
+def disposition_disagreement_set_based(ct, sat):
+    """Original set-algebra formulation. Kept as the primary computation."""
+    st = {n: statuses(v) for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    ids = {
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))
+    }
+    return ids
+
+
+def disposition_disagreement_independent(ct, sat):
+    """Independent re-derivation of the same predicate.
+
+    Deliberately avoids the precomputed `st` dict and set-intersection
+    idiom used above: it walks each object's phase rows directly with an
+    explicit loop, accumulates boolean flags one phase at a time, and
+    applies the disagreement/exception logic as nested if/else rather than
+    a single boolean expression. Any divergence between this result and
+    disposition_disagreement_set_based indicates a bug in one of the two
+    implementations rather than a shared blind spot.
+    """
+    ids = set()
+    for n, phases in sat.items():
+        row = ct.get(n)
+        if row is None:
+            continue
+
+        decay_date = row.get("DECAY_DATE", "")
+        is_decayed = decay_date.strip() != ""
+
+        seen_gone = False
+        seen_left_earth = False
+        for p in phases:
+            status = p.get("Status", "").strip()
+            if not seen_gone:
+                for code in GONE:
+                    if status == code:
+                        seen_gone = True
+                        break
+            if not seen_left_earth:
+                for code in LEFT_EARTH:
+                    if status == code:
+                        seen_left_earth = True
+                        break
+
+        if is_decayed and seen_left_earth and not seen_gone:
+            # Exception case: catalogued as decayed, phases only show it
+            # having left Earth (e.g. lunar/solar-orbit disposal), never
+            # an explicit "gone" phase. Treated as consistent.
+            continue
+
+        if seen_gone:
+            if not is_decayed:
+                ids.add(n)
+        else:
+            if is_decayed:
+                ids.add(n)
+
+    return ids
+
+
+def verify_disposition_disagreement(ct, sat):
+    """Cross-check the two independent implementations.
+
+    Returns (count, ids). Raises AssertionError with a diagnostic diff if
+    the two methods disagree, so the governance gate can fail loudly
+    instead of silently trusting a single code path.
+    """
+    a = disposition_disagreement_set_based(ct, sat)
+    b = disposition_disagreement_independent(ct, sat)
+    if a != b:
+        only_a = sorted(a - b)
+        only_b = sorted(b - a)
+        raise AssertionError(
+            "DispositionDisagreement cross-check mismatch: "
+            f"set-based={len(a)} independent={len(b)} "
+            f"only_in_set_based={only_a[:20]} only_in_independent={only_b[:20]}"
+        )
+    return len(a), a
+
+
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import (
+    load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST,
+    verify_disposition_disagreement,
+)
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+
+    # Dual-path verification: independently recompute DispositionDisagreement
+    # and hard-fail if the two derivations diverge, before trusting the count.
+    disposition_disagreement_count, _ = verify_disposition_disagreement(ct, sat)
+
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_disagreement_count,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }

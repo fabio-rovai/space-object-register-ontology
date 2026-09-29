@@ -1,0 +1,179 @@
+# ---- pipeline/verify_disposition.py ----
+"""Independent verification path for the DispositionDisagreement count.
+
+This module deliberately shares no code with reconcile.py or
+governance_report.py. It uses its own file readers, its own NORAD ID
+normalisation, and its own status vocabulary built from the GCAT
+'Phases and Status Values' table (release 1.8.8). As a result, any bug
+in the primary loaders or constants shows up as a count mismatch instead
+of being repeated here.
+
+The primary module is imported only in main(), to compare the two counts.
+
+Metric definition (same as governance_report.python_side):
+  For every NORAD number N that appears in both GCAT satcat and CelesTrak:
+    gcat_gone  = some phase of N has a status in the terminal-at-C group
+    ct_decayed = CelesTrak DECAY_DATE is non-empty
+    disagree   = gcat_gone != ct_decayed
+  except when ct_decayed, and N has a left-Earth status, and gcat_gone is
+  False (the object departed Earth space rather than reentering).
+"""
+import argparse
+import csv
+import json
+import pathlib
+import sys
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Status vocabulary, transcribed group by group from the GCAT table.
+# Each group is keyed by how the source page describes t2 and Dest.
+_SPEC_GROUPS = {
+    "t2_dest_empty": {"O", "AO", "AO IN", "UDK", "REL", "DEP", "TO", "TOA", "OX"},
+    "dest_blank_t2_set": {"E", "N", "NA", "LEASE"},
+    "dest_location_on_C": {"S", "R", "D", "L", "LF", "AS", "AR", "AR IN",
+                           "AL", "AL IN", "TX", "F", "AF"},
+    "dest_deep_space_jcat": {"DSO", "DSA", "DSA IN", "LO", "LOA"},
+    "dest_main_jcat": {"DK", "GRP", "ATT", "TFR", "TFR E", "TFR IN", "C",
+                       "EVA DP", "EVA RP", "REFLT"},
+    "dest_body_name": {"EO", "EAO", "EN", "OI", "OE"},
+    "special": {"ERR"},
+}
+_LEGACY_ALIASES = {"ALO": "TOA"}  # the table notes that TOA "was ALO"
+
+KNOWN_STATUSES = set().union(*_SPEC_GROUPS.values()) | set(_LEGACY_ALIASES)
+TERMINAL_AT_C = frozenset(_SPEC_GROUPS["dest_location_on_C"])
+DEPARTED_EARTH = frozenset(_SPEC_GROUPS["dest_deep_space_jcat"] | _SPEC_GROUPS["dest_body_name"])
+
+# Every status code must belong to exactly one group.
+assert sum(len(g) for g in _SPEC_GROUPS.values()) == len(set().union(*_SPEC_GROUPS.values())), \
+    "status vocabulary groups overlap"
+
+
+def _norad_key(raw):
+    """Return the canonical NORAD key, or None if raw is not a pure integer."""
+    s = (raw or "").strip()
+    if not s or not s.isdigit():
+        return None
+    return str(int(s))
+
+
+def read_celestrak_decay(path=DATA / "celestrak_satcat.csv"):
+    """Return {norad: decayed_bool} and a diagnostics dict."""
+    decayed, diag = {}, {"rows": 0, "bad_id": 0, "dup_id": 0}
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        rdr = csv.reader(f)
+        header = [h.strip() for h in next(rdr)]
+        i_id = header.index("NORAD_CAT_ID")
+        i_dec = header.index("DECAY_DATE")
+        for row in rdr:
+            if not row:
+                continue
+            diag["rows"] += 1
+            k = _norad_key(row[i_id] if i_id < len(row) else "")
+            if k is None:
+                diag["bad_id"] += 1
+                continue
+            if k in decayed:
+                diag["dup_id"] += 1
+            # Last row wins, which matches dict assignment in the primary path.
+            decayed[k] = bool((row[i_dec] if i_dec < len(row) else "").strip())
+    return decayed, diag
+
+
+def read_gcat_status_sets(path=DATA / "gcat_satcat.tsv"):
+    """Return {norad: set(status codes)} and a diagnostics dict.
+
+    Rows with fewer fields than the header are counted and skipped, as in
+    the primary path, so the population definition stays the same.
+    """
+    by_id, diag = {}, {"rows": 0, "short_rows": 0, "unnumbered": 0, "unknown_status": {}}
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        first = f.readline()
+        header = [h.strip() for h in first.lstrip("#").rstrip("\r\n").split("\t")]
+        i_sat = header.index("Satcat")
+        i_st = header.index("Status")
+        width = len(header)
+        for row in csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE):
+            if not row or row[0].startswith("#"):
+                continue
+            if len(row) < width:
+                diag["short_rows"] += 1
+                continue
+            diag["rows"] += 1
+            k = _norad_key(row[i_sat])
+            if k is None:
+                diag["unnumbered"] += 1
+                continue
+            st = row[i_st].strip()
+            st = _LEGACY_ALIASES.get(st, st)
+            if st not in KNOWN_STATUSES:
+                diag["unknown_status"][st] = diag["unknown_status"].get(st, 0) + 1
+            by_id.setdefault(k, set()).add(st)
+    return by_id, diag
+
+
+def disposition_disagreements(gcat_status, ct_decayed):
+    """Return the sorted list of NORAD ids whose dispositions disagree."""
+    out = []
+    for n in gcat_status.keys() & ct_decayed.keys():
+        codes = gcat_status[n]
+        gone = not codes.isdisjoint(TERMINAL_AT_C)
+        departed = not codes.isdisjoint(DEPARTED_EARTH)
+        dec = ct_decayed[n]
+        if gone == dec:
+            continue
+        if dec and departed and not gone:
+            continue
+        out.append(n)
+    return sorted(out, key=int)
+
+
+def independent_count():
+    ct, ct_diag = read_celestrak_decay()
+    gs, g_diag = read_gcat_status_sets()
+    ids = disposition_disagreements(gs, ct)
+    return len(ids), ids, {"celestrak": ct_diag, "gcat_satcat": g_diag}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--strict", action="store_true",
+                    help="fail on GCAT status codes that are not in the documented vocabulary")
+    ap.add_argument("--dump", type=pathlib.Path,
+                    help="write the disagreeing NORAD ids and diagnostics as JSON")
+    args = ap.parse_args(argv)
+
+    n_ind, ids, diag = independent_count()
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side  # comparison only
+    n_pri = python_side()["DispositionDisagreement"]
+
+    report = {
+        "metric": "DispositionDisagreement",
+        "primary": n_pri,
+        "independent": n_ind,
+        "match": n_pri == n_ind,
+        "diagnostics": diag,
+    }
+    print(json.dumps(report, indent=2, sort_keys=True))
+    if args.dump:
+        args.dump.write_text(json.dumps({**report, "ids": ids}, indent=2, sort_keys=True))
+
+    rc = 0
+    unknown = diag["gcat_satcat"]["unknown_status"]
+    if unknown:
+        print(f"WARNING: undocumented GCAT status codes: {unknown}", file=sys.stderr)
+        if args.strict:
+            rc = 2
+    if n_pri != n_ind:
+        print(f"FAIL: DispositionDisagreement primary={n_pri} independent={n_ind}", file=sys.stderr)
+        rc = 1
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

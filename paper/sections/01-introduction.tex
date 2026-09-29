@@ -1,0 +1,53 @@
+\section{Introduction}
+
+A pipeline that produces more numbers than its authors can trace by hand has to
+check itself, and one standard way to do it is redundancy: compute every
+quantity that will be published by two routes built on different technology,
+compare them, and refuse to exit successfully unless they agree. The check is
+cheap, mechanical, and needs no ground truth, which is why it appeals wherever
+findings are generated faster than they can be audited, including in systems
+that propose and test hypotheses automatically \citep{lu2024aiscientist}. The
+same intuition, that agreement between routes stands in for a correctness
+signal, underwrites self-consistency decoding \citep{wang2023selfconsistency}
+and the use of agreement between generated code and generated tests to rank
+programs \citep{chen2023codet}.
+
+This paper is a case study of one such gate failing, in a pipeline we built. It
+is a single incident, and we do not claim that it tells us how often redundancy
+gates fail. What it can do is show one failure completely: the gate, the wrong
+and corrected numbers, the definition that caused the error, and what did and
+did not catch it.
+
+The pipeline compares two independently maintained public catalogues of
+artificial Earth-orbiting objects and emits an RDF graph of typed defect
+assertions. A dual-computation gate counts each defect class twice, once
+set-based in Python from the source files and once by SPARQL over the emitted
+graph, and exits non-zero on any disagreement. On the run whose numbers were
+published it printed \texttt{ALL CROSS-CHECKS AGREE}. Three of the seven counts
+it compared were wrong, and the largest was overstated more than fourfold. Both
+paths imported the same classification constants, and those constants encoded a
+misreading of the source's vocabulary of flight-phase status codes. Two correct
+implementations of one wrong reading agree perfectly, so the error was
+common-mode and the gate was silent by construction. The multiversion
+programming literature established long ago that separately developed versions
+of a program do not fail independently
+\citep{knight1986experimental, eckhardt1985theoretical, littlewood1989conceptual};
+our case is a data-pipeline instance of that result in which the shared artifact
+is not a specification but an executable set of constants.
+
+The contributions are four, each bounded to this pipeline.
+First, the mechanism, with an object-level ledger that reconciles every figure
+across versions of the count (Sections~\ref{sec:failure}
+and~\ref{sec:mechanism}, Appendix~\ref{app:ledger}).
+Second, three checks that go back to the source's own documentation, each
+implemented and run on the defective code and on its correction
+(Sections~\ref{sec:caught} and~\ref{sec:gates}).
+Third, a second-order failure. Checking our correction against every object's
+phase history showed that it misread the same vocabulary in a different way, and that
+none of our three checks had noticed (Section~\ref{sec:second}).
+Fourth, an experiment on whether a code-generating model asked for an
+independent verification path produces one (Section~\ref{sec:automation}).
+
+Redundancy remains worth having; it verifies implementation. The errors that
+reached publication here were errors of meaning, which two paths built on shared
+definitions cannot test.

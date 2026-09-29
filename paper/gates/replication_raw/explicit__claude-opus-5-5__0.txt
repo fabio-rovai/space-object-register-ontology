@@ -1,0 +1,196 @@
+"""Independent verification of the DispositionDisagreement count.
+
+This module deliberately shares no code, imports, or constants with
+pipeline/reconcile.py or pipeline/governance_report.py. The status code
+tables are re-transcribed from the GCAT phase documentation
+(planet4589.org/space/gcat/web/intro/phases.html), and both source files are
+parsed with separate logic. A defect in one path should therefore show up
+as a mismatch between the two paths instead of repeating in both.
+
+Definition being verified, for each NORAD number present in BOTH CelesTrak
+SATCAT and GCAT satcat:
+
+  gcat_terminated = at least one GCAT phase has a terminal (re-entered,
+                    landed, destroyed, merged, failed, etc.) status
+  ct_decayed      = the CelesTrak DECAY_DATE field is non-empty
+
+  The object disagrees when gcat_terminated != ct_decayed, with one
+  exemption: CelesTrak has a decay date and GCAT shows the object left Earth
+  orbit (deep space, heliocentric, lunar, etc.) with no terminal phase.
+  CelesTrak commonly records departure from Earth orbit as a decay, so this
+  combination is not a real disagreement.
+
+Usage:
+  python pipeline/verify_disposition.py [--data DIR] [--expect N] [--details FILE]
+
+Exit codes:
+  0  count computed (and matches --expect, if given)
+  1  count does not match --expect
+  2  input problem (missing file, missing column)
+"""
+import argparse
+import csv
+import json
+import os
+import sys
+
+# Status codes transcribed separately from the GCAT phase documentation.
+# Do not import these from reconcile.py. The duplication is intentional.
+_TERMINAL_CODES = frozenset([
+    "R",      # re-entered
+    "D",      # deorbited
+    "L",      # landed
+    "LF",     # landed, failed
+    "S",      # merged with another object (docked or stacked)
+    "F",      # launch failure
+    "AF",     # attached, failure
+    "AS",     # attached, merged
+    "AR",     # attached, re-entered
+    "AR IN",  # attached internally, re-entered
+    "AL",     # attached, landed
+    "AL IN",  # attached internally, landed
+    "TX",     # transferred or ended
+])
+
+_BEYOND_EARTH_CODES = frozenset([
+    "DSO",     # deep space orbit
+    "DSA",     # deep space, attached
+    "DSA IN",  # deep space, attached internally
+    "EO",      # Earth escape orbit
+    "EAO",     # Earth escape, attached
+    "EN",      # en route
+    "OI",      # orbit of another body, inactive
+    "OE",      # orbit of another body, exited
+    "LO",      # lunar orbit
+    "LOA",     # lunar orbit, attached
+])
+
+
+def _norm_norad(raw):
+    """Canonical NORAD key: a decimal integer string with no leading zeros.
+
+    Returns None when the value is not purely numeric.
+    """
+    txt = (raw or "").strip()
+    if not txt or not all(ch in "0123456789" for ch in txt):
+        return None
+    return str(int(txt, 10))
+
+
+def _read_celestrak(path):
+    """Map NORAD number to a flag saying whether CelesTrak records a decay."""
+    decayed = {}
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise SystemExit("verify_disposition: CelesTrak column missing: %s" % exc) from None
+        for rec in reader:
+            if len(rec) <= max(i_id, i_dec):
+                continue
+            key = _norm_norad(rec[i_id])
+            if key is None:
+                continue
+            decayed[key] = bool(rec[i_dec].strip())
+    return decayed
+
+
+def _read_gcat_statuses(path):
+    """Map NORAD number to the set of status codes across all its GCAT phases."""
+    result = {}
+    malformed = 0
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        first = fh.readline()
+        header = [h.strip() for h in first.rstrip("\r\n").lstrip("#").split("\t")]
+        try:
+            i_sat = header.index("Satcat")
+            i_st = header.index("Status")
+        except ValueError as exc:
+            raise SystemExit("verify_disposition: GCAT column missing: %s" % exc) from None
+        width = len(header)
+        for raw in fh:
+            if raw[:1] == "#":
+                continue
+            fields = raw.rstrip("\r\n").split("\t")
+            if len(fields) < width:
+                malformed += 1
+                continue
+            key = _norm_norad(fields[i_sat])
+            if key is None:
+                continue
+            result.setdefault(key, set()).add(fields[i_st].strip())
+    return result, malformed
+
+
+def _classify(codes, ct_decayed):
+    """Return None if the catalogues agree, otherwise a short reason string."""
+    terminated = not codes.isdisjoint(_TERMINAL_CODES)
+    left_earth = not codes.isdisjoint(_BEYOND_EARTH_CODES)
+    if terminated and not ct_decayed:
+        return "gcat_terminated_celestrak_not_decayed"
+    if ct_decayed and not terminated:
+        if left_earth:
+            return None
+        return "celestrak_decayed_gcat_not_terminated"
+    return None
+
+
+def verify(data_dir):
+    decayed = _read_celestrak(os.path.join(data_dir, "celestrak_satcat.csv"))
+    gcat, malformed = _read_gcat_statuses(os.path.join(data_dir, "gcat_satcat.tsv"))
+
+    reasons = {}
+    for key in sorted(set(decayed) & set(gcat), key=int):
+        why = _classify(gcat[key], decayed[key])
+        if why is not None:
+            reasons[key] = why
+
+    tally = {}
+    for why in reasons.values():
+        tally[why] = tally.get(why, 0) + 1
+
+    return {
+        "DispositionDisagreement": len(reasons),
+        "breakdown": tally,
+        "shared_objects": len(set(decayed) & set(gcat)),
+        "gcat_malformed_rows_skipped": malformed,
+        "objects": reasons,
+    }
+
+
+def main(argv=None):
+    here = os.path.dirname(os.path.abspath(__file__))
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--data", default=os.path.join(os.path.dirname(here), "data"))
+    ap.add_argument("--expect", type=int, default=None,
+                    help="count from the primary path; exit 1 when it differs")
+    ap.add_argument("--details", default=None,
+                    help="write the per-object disagreement list to this JSON file")
+    args = ap.parse_args(argv)
+
+    for name in ("celestrak_satcat.csv", "gcat_satcat.tsv"):
+        if not os.path.isfile(os.path.join(args.data, name)):
+            print("verify_disposition: missing input %s" % name, file=sys.stderr)
+            return 2
+
+    res = verify(args.data)
+
+    if args.details:
+        with open(args.details, "w", encoding="utf-8") as fh:
+            json.dump(res["objects"], fh, indent=1, sort_keys=True)
+
+    summary = {k: v for k, v in res.items() if k != "objects"}
+    print(json.dumps(summary, indent=2, sort_keys=True))
+
+    if args.expect is not None and args.expect != res["DispositionDisagreement"]:
+        print("verify_disposition: MISMATCH primary=%d independent=%d"
+              % (args.expect, res["DispositionDisagreement"]), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

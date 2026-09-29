@@ -1,0 +1,42 @@
+```python
+def verify_disposition_disagreement():
+    """Independent verification of DispositionDisagreement count.
+    
+    Alternative computation path: iterates over CelesTrak instead of GCAT,
+    uses explicit conditionals instead of set comprehension, to independently
+    verify the primary calculation and catch logical errors.
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    gcat_statuses = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ct_decayed = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    
+    count = 0
+    for norad_id in ct:
+        if norad_id not in sat:
+            continue
+        
+        gcat_is_gone = bool(gcat_statuses[norad_id] & GONE)
+        ct_is_gone = norad_id in ct_decayed
+        
+        if gcat_is_gone != ct_is_gone:
+            if ct_is_gone and (gcat_statuses[norad_id] & LEFT_EARTH) and not gcat_is_gone:
+                continue
+            count += 1
+    
+    return count
+
+
+if __name__ == "__main__":
+    primary_results = python_side()
+    verified_disposition = verify_disposition_disagreement()
+    
+    if primary_results["DispositionDisagreement"] != verified_disposition:
+        print(f"VERIFICATION FAILED: DispositionDisagreement mismatch", file=sys.stderr)
+        print(f"  Primary: {primary_results['DispositionDisagreement']}", file=sys.stderr)
+        print(f"  Verify: {verified_disposition}", file=sys.stderr)
+        sys.exit(1)
+    
+    print(json.dumps(primary_results, indent=2))
+```

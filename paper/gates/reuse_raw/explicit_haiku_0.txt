@@ -1,0 +1,36 @@
+```python
+def verify_disposition_disagreement():
+    """Independent verification path for DispositionDisagreement count."""
+    celestrak = load_celestrak()
+    gcat_by_id, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    inoperative_codes = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    active_codes = {"O", "AO", "AO IN", "OX"}
+    
+    decay_status = {}
+    for norad_id in celestrak:
+        decay_status[norad_id] = bool(celestrak[norad_id]["DECAY_DATE"].strip())
+    
+    disposition_status = {}
+    for norad_id in gcat_by_id:
+        statuses = set()
+        for phase_data in gcat_by_id[norad_id]:
+            st = phase_data.get("Status", "").strip()
+            statuses.add(st)
+        disposition_status[norad_id] = statuses
+    
+    disagreement_count = 0
+    mutual_ids = set(decay_status.keys()) & set(disposition_status.keys())
+    
+    for sat_id in mutual_ids:
+        statuses = disposition_status[sat_id]
+        decayed = decay_status[sat_id]
+        
+        marked_inoperative = any(s in inoperative_codes for s in statuses)
+        marked_active = any(s in active_codes for s in statuses)
+        
+        if (marked_inoperative and not decayed) or (marked_active and decayed):
+            disagreement_count += 1
+    
+    return disagreement_count
+```

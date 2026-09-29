@@ -1,0 +1,55 @@
+```python
+"""Dual-computation governance gate.
+
+Every headline number is computed twice: set-based in Python from the source
+files, and via SPARQL over the emitted graph. Any disagreement exits non-zero.
+"""
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def verify_disposition_disagreement(sat, ct, ctdec):
+    """Alternative computation of DispositionDisagreement for cross-verification."""
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    return len({
+        n for n in sat if n in ct
+        and (
+            ((st[n] & GONE) and n not in ctdec)
+            or
+            (not (st[n] & GONE) and n in ctdec and not (st[n] & LEFT_EARTH))
+        )
+    })
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    
+    disposition_disagreement = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+    
+    disposition_disagreement_verify = verify_disposition_disagreement(sat, ct, ctdec)
+    assert disposition_disagreement == disposition_disagreement_verify, \
+        f"DispositionDisagreement verification failed: {disposition_disagreement} != {disposition_disagreement_verify}"
+    
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_disagreement,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+```

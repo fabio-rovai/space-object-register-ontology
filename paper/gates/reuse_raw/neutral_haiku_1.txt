@@ -1,0 +1,43 @@
+```python
+def verify_disposition_disagreement(ct, sat):
+    """Verification path: independently recompute DispositionDisagreement count."""
+    st = {n: statuses(v) for n, v in sat.items()}
+    
+    disagreements = set()
+    
+    for norad in (set(ct) & set(sat)):
+        gcat_status = st[norad]
+        has_decay = bool(ct[norad]["DECAY_DATE"].strip())
+        
+        is_gone = bool(gcat_status & GONE)
+        is_inorbit = bool(gcat_status & INORBIT)
+        
+        if is_gone and not has_decay:
+            disagreements.add(norad)
+        
+        if is_inorbit and has_decay:
+            disagreements.add(norad)
+    
+    return len(disagreements)
+
+
+def python_side_with_verification():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    
+    result = {"DispositionDisagreement": len((gone - ctdec) | (inorb & ctdec))}
+    
+    st = {n: statuses(v) for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    both = set(ct) & set(sat)
+    gone = {n for n in both if st[n] & GONE}
+    inorb = {n for n in both if st[n] & INORBIT}
+    
+    verified_count = verify_disposition_disagreement(ct, sat)
+    
+    assert result["DispositionDisagreement"] == verified_count, \
+        f"Mismatch: {result['DispositionDisagreement']} != {verified_count}"
+    
+    result["DispositionDisagreement_verified"] = verified_count
+    return result
+```

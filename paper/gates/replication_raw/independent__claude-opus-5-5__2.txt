@@ -1,0 +1,231 @@
+"""Independent verification of the DispositionDisagreement count.
+
+Recomputes DispositionDisagreement without reusing reconcile.load_celestrak,
+reconcile.load_gcat, or the status-code constants, then compares the result
+against governance_report.python_side(). Exits non-zero on any disagreement.
+
+What differs from the primary path:
+  * Parses both source files with the csv module, not by manual splitting.
+  * Normalises NORAD numbers to int on both sides. The primary path does this
+    only on the GCAT side.
+  * Holds its own copy of the GCAT status vocabulary. If the two copies drift,
+    that is reported as a separate failure.
+  * Classifies each object through an explicit decision table instead of one
+    compound boolean expression.
+  * Reports parser anomalies that the primary path drops silently: short rows,
+    duplicate CelesTrak IDs and unknown status codes.
+"""
+import csv
+import json
+import pathlib
+import re
+import sys
+from collections import Counter, defaultdict
+
+csv.field_size_limit(10_000_000)
+
+HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parent
+DATA = ROOT / "data"
+
+# Independent copy of the status vocabulary.
+# Source: planet4589.org/space/gcat/web/intro/phases.html
+# It is kept separate from reconcile.py on purpose. Do not import it from there.
+V_GONE = frozenset({
+    "R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN",
+    "AL", "AL IN", "TX",
+})
+V_INORBIT = frozenset({"O", "AO", "AO IN", "OX"})
+V_LEFT_EARTH = frozenset({
+    "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA",
+})
+V_ERROR = frozenset({"ERR"})
+V_KNOWN = V_GONE | V_INORBIT | V_LEFT_EARTH | V_ERROR
+
+_DIGITS = re.compile(r"^\d+$")
+
+
+def _norad(raw):
+    """Return a canonical NORAD key (decimal string, no leading zeros) or None."""
+    s = (raw or "").strip()
+    if not _DIGITS.match(s):
+        return None
+    return str(int(s))
+
+
+def read_celestrak_decay(path):
+    """Return ({norad: decayed_bool}, diagnostics).
+
+    If an ID appears more than once, the last row wins, as in the primary path.
+    Duplicates are counted so that the ambiguity is visible.
+    """
+    decayed = {}
+    seen = Counter()
+    bad_ids = 0
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        rdr = csv.reader(f)
+        header = [h.strip() for h in next(rdr)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as e:
+            raise SystemExit(f"CelesTrak header missing required column: {e}")
+        for row in rdr:
+            if not row:
+                continue
+            if len(row) <= max(i_id, i_dec):
+                bad_ids += 1
+                continue
+            key = _norad(row[i_id])
+            if key is None:
+                bad_ids += 1
+                continue
+            seen[key] += 1
+            decayed[key] = bool(row[i_dec].strip())
+    diag = {
+        "celestrak_rows_unusable": bad_ids,
+        "celestrak_duplicate_ids": sum(1 for c in seen.values() if c > 1),
+    }
+    return decayed, diag
+
+
+def read_gcat_statuses(path):
+    """Return ({norad: set_of_statuses}, diagnostics).
+
+    Short rows are skipped, as in the primary path, but they are counted.
+    The count also records how many of them carried a numeric Satcat value.
+    """
+    statuses = defaultdict(set)
+    short_rows = 0
+    short_rows_with_norad = 0
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        header_line = f.readline()
+        header = [h.strip() for h in header_line.lstrip("#").rstrip("\r\n").split("\t")]
+        try:
+            i_sat = header.index("Satcat")
+            i_st = header.index("Status")
+        except ValueError as e:
+            raise SystemExit(f"GCAT header missing required column: {e}")
+        rdr = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+        for row in rdr:
+            if not row or row[0].startswith("#"):
+                continue
+            if len(row) < len(header):
+                short_rows += 1
+                if len(row) > i_sat and _norad(row[i_sat]) is not None:
+                    short_rows_with_norad += 1
+                continue
+            key = _norad(row[i_sat])
+            if key is None:
+                continue
+            statuses[key].add(row[i_st].strip())
+    diag = {
+        "gcat_short_rows_skipped": short_rows,
+        "gcat_short_rows_with_norad": short_rows_with_norad,
+    }
+    return dict(statuses), diag
+
+
+def classify(gcat_statuses, ct_decayed):
+    """Decision table for a single object that appears in both catalogues.
+
+    Returns (disagrees: bool, reason: str).
+    """
+    gone = bool(gcat_statuses & V_GONE)
+    left_earth = bool(gcat_statuses & V_LEFT_EARTH)
+
+    if gone and ct_decayed:
+        return False, "agree_gone"
+    if gone and not ct_decayed:
+        return True, "gcat_gone_celestrak_active"
+    if not gone and not ct_decayed:
+        return False, "agree_active"
+    # Remaining case: not gone in GCAT, decayed in CelesTrak.
+    if left_earth:
+        return False, "excused_left_earth"
+    return True, "celestrak_decayed_gcat_active"
+
+
+def independent_disposition_disagreement():
+    ct, ct_diag = read_celestrak_decay(DATA / "celestrak_satcat.csv")
+    gc, gc_diag = read_gcat_statuses(DATA / "gcat_satcat.tsv")
+
+    reasons = Counter()
+    flagged = []
+    unknown_codes = Counter()
+    for norad in sorted(set(gc) & set(ct), key=int):
+        sts = gc[norad]
+        for s in sts - V_KNOWN:
+            unknown_codes[s] += 1
+        bad, why = classify(sts, ct[norad])
+        reasons[why] += 1
+        if bad:
+            flagged.append(norad)
+
+    return {
+        "count": len(flagged),
+        "ids": flagged,
+        "breakdown": dict(reasons),
+        "unknown_status_codes": dict(unknown_codes),
+        **ct_diag,
+        **gc_diag,
+    }
+
+
+def vocab_drift():
+    """Compare this module's vocabulary with reconcile.py. Returns a list of problems."""
+    sys.path.insert(0, str(HERE))
+    import reconcile
+    problems = []
+    for name, mine, theirs in (
+        ("GONE", V_GONE, reconcile.GONE),
+        ("LEFT_EARTH", V_LEFT_EARTH, reconcile.LEFT_EARTH),
+    ):
+        if set(mine) != set(theirs):
+            problems.append({
+                "set": name,
+                "only_in_verifier": sorted(set(mine) - set(theirs)),
+                "only_in_reconcile": sorted(set(theirs) - set(mine)),
+            })
+    return problems
+
+
+def main():
+    indep = independent_disposition_disagreement()
+
+    sys.path.insert(0, str(HERE))
+    from governance_report import python_side
+    primary = python_side()["DispositionDisagreement"]
+
+    drift = vocab_drift()
+    ok = (indep["count"] == primary) and not drift
+
+    report = {
+        "metric": "DispositionDisagreement",
+        "primary": primary,
+        "independent": indep["count"],
+        "match": indep["count"] == primary,
+        "vocab_drift": drift,
+        "breakdown": indep["breakdown"],
+        "unknown_status_codes": indep["unknown_status_codes"],
+        "diagnostics": {
+            k: indep[k] for k in (
+                "celestrak_rows_unusable",
+                "celestrak_duplicate_ids",
+                "gcat_short_rows_skipped",
+                "gcat_short_rows_with_norad",
+            )
+        },
+    }
+    if not ok:
+        report["independent_ids_sample"] = indep["ids"][:50]
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    if not ok:
+        print("FAIL: DispositionDisagreement cross-check did not agree", file=sys.stderr)
+        sys.exit(1)
+    print("OK: DispositionDisagreement cross-check agrees", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

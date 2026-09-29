@@ -27,14 +27,17 @@ GCAT objects, plus GCAT's `auxcat`, `ftocat` and `satcat100k`:
   counts as a tracked object still in orbit.
 - **1,094 objects GCAT records as no longer tracked** carry no data status code
   in CelesTrak. This is not a missing field. CelesTrak maintains that field and
-  uses it on 1,292 other objects, 1,041 as "No Elements Available" and 251 as
-  "No Initial Elements". Ten of the GCAT-lost objects are flagged. The other
+  uses it on 1,292 objects, 1,041 as "No Elements Available" and 251 as
+  "No Initial Elements". Ten of those are GCAT-lost objects. The other
   1,094 are presented as ordinary on-orbit objects.
-- **261 objects on which the two catalogues genuinely disagree** about whether
-  the object still exists in orbit. 216 are recorded by GCAT as destroyed or
-  returned while CelesTrak publishes no decay date, of which 154 are reentries,
-  30 explosions, 14 deorbits and 14 collisions, spread across every decade from
-  the 1960s to the 2020s. The remaining 45 run the other way.
+- **220 objects on which the two catalogues genuinely disagree** about whether
+  the object still exists in orbit, once each object is read through its full
+  GCAT phase history. 175 are recorded by GCAT as gone while CelesTrak publishes
+  no decay date (154 reentries, 15 deorbits, 4 reentered attached, 2 collisions);
+  the remaining 45 run the other way. The committed pipeline still reports 261,
+  because it does not read GCAT's event catalogue; 42 of those are explosions and
+  collisions that GCAT itself records as continuing in orbit. See
+  `paper/gates/history_check.py` and the correction in `BUILD_REPORT.md`.
 - **622 objects** appear in CelesTrak and in none of GCAT's four catalogues.
 - **605 objects GCAT tracks have no NORAD number at all.** 334 of them are still
   in orbit, 538 launched since 2020, and 298 are Chinese.

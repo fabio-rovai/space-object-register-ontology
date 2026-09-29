@@ -1,0 +1,64 @@
+```python
+def verify_disposition_disagreement_independent():
+    """Independent verification of DispositionDisagreement count.
+    
+    Uses separate data loading and different computation logic
+    from the original implementation.
+    """
+    import csv, collections
+    
+    csv.field_size_limit(10_000_000)
+    
+    # Load CelesTrak independently
+    ct_decay_status = {}
+    with open(DATA/"celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        for row in csv.DictReader(f):
+            nid = row["NORAD_CAT_ID"].strip()
+            ct_decay_status[nid] = bool(row["DECAY_DATE"].strip())
+    
+    # Load GCAT independently
+    gcat_phases = collections.defaultdict(list)
+    with open(DATA/"gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        headers = [h.strip() for h in f.readline().lstrip("#").rstrip("\n").split("\t")]
+        for line in f:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < len(headers):
+                continue
+            record = dict(zip(headers, [x.strip() for x in fields]))
+            satcat = record.get("Satcat", "")
+            if satcat.isdigit():
+                nid = str(int(satcat))
+                gcat_phases[nid].append(record.get("Status", ""))
+    
+    # Independent status definitions
+    terminal_statuses = {"R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"}
+    escape_statuses = {"DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"}
+    
+    disagreement_count = 0
+    
+    for nid in gcat_phases:
+        if nid not in ct_decay_status:
+            continue
+        
+        # Check GCAT disposition
+        phase_statuses = {s.strip() for s in gcat_phases[nid]}
+        has_terminal = any(s in terminal_statuses for s in phase_statuses)
+        has_escape = any(s in escape_statuses for s in phase_statuses)
+        
+        # Check CT disposition
+        ct_has_decay = ct_decay_status[nid]
+        
+        # Detect disagreement
+        is_disagreement = (has_terminal != ct_has_decay)
+        
+        # Apply exception: CT shows decay AND GCAT shows escape AND not terminal
+        if ct_has_decay and has_escape and not has_terminal:
+            is_disagreement = False
+        
+        if is_disagreement:
+            disagreement_count += 1
+    
+    return disagreement_count
+```

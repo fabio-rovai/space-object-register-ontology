@@ -1,0 +1,105 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+
+
+def disposition_disagreement_v2():
+    """Independent recomputation of DispositionDisagreement.
+
+    Deliberately avoids the set-comprehension/global-status-set style used in
+    python_side(): it walks CelesTrak rows one at a time, derives each
+    object's GCAT disposition with explicit per-row loops and boolean flags
+    (no shared `st` dict, no set intersection operators), and applies the
+    same three-part predicate through nested if/else logic instead of a
+    single boolean expression. A structurally different code path guards
+    against a shared bug in the primary implementation.
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+
+    count = 0
+    for norad, ct_row in ct.items():
+        phases = sat.get(norad)
+        if not phases:
+            continue
+
+        has_gone_status = False
+        has_left_earth_status = False
+        for phase in phases:
+            code = phase.get("Status", "").strip()
+            if code in GONE:
+                has_gone_status = True
+            if code in LEFT_EARTH:
+                has_left_earth_status = True
+
+        decay_date = ct_row.get("DECAY_DATE", "").strip()
+        celestrak_says_decayed = decay_date != ""
+
+        if celestrak_says_decayed:
+            if has_gone_status:
+                disagree = False
+            else:
+                # CelesTrak says decayed, GCAT never marked GONE. That's
+                # tolerated only if GCAT instead marked it as having left
+                # Earth orbit entirely (escape/lunar/etc.), which is a
+                # different but consistent kind of "no longer in orbit".
+                disagree = not has_left_earth_status
+        else:
+            # CelesTrak says still on orbit.
+            disagree = has_gone_status
+
+        if disagree:
+            count += 1
+
+    return count
+
+
+def verify_disposition_disagreement(results):
+    """Cross-check the primary DispositionDisagreement figure.
+
+    Recomputes the metric via a structurally independent code path
+    (disposition_disagreement_v2) and aborts the pipeline if it disagrees
+    with the value already produced by python_side().
+    """
+    primary = results["DispositionDisagreement"]
+    secondary = disposition_disagreement_v2()
+    if primary != secondary:
+        sys.stderr.write(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement mismatch "
+            f"between primary computation ({primary}) and independent "
+            f"verification path ({secondary}).\n"
+        )
+        sys.exit(1)
+    return secondary
+
+
+if __name__ == "__main__":
+    results = python_side()
+    verify_disposition_disagreement(results)
+    print(json.dumps(results, indent=2))

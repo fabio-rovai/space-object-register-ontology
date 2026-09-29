@@ -1,0 +1,33 @@
+from reconcile import load_celestrak, load_gcat, GONE, INORBIT
+
+def independent_side():
+    ct = load_celestrak()
+    by_norad, _, _ = load_gcat("gcat_satcat.tsv")
+
+    mismatches = 0
+    for norad in by_norad:
+        if norad not in ct:
+            continue
+        phase_statuses = {p.get("Status", "").strip() for p in by_norad[norad]}
+        is_gone = any(s in GONE for s in phase_statuses)
+        is_inorbit = any(s in INORBIT for s in phase_statuses)
+        has_decay_date = bool(ct[norad]["DECAY_DATE"].strip())
+
+        if (is_gone and not has_decay_date) or (is_inorbit and has_decay_date):
+            mismatches += 1
+
+    return {"DispositionDisagreement": mismatches}
+
+
+def cross_check():
+    from governance_report import python_side
+
+    primary = python_side()["DispositionDisagreement"]
+    verified = independent_side()["DispositionDisagreement"]
+
+    if primary != verified:
+        raise AssertionError(
+            f"DispositionDisagreement mismatch: python_side={primary} independent_side={verified}"
+        )
+
+    return verified

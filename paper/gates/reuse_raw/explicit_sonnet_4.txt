@@ -1,0 +1,57 @@
+import csv
+
+def _read_celestrak_decay_flags(path="data/celestrak_satcat.csv"):
+    decay = {}
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            norad = (row.get("NORAD_CAT_ID") or "").strip()
+            if not norad:
+                continue
+            decay[norad] = bool((row.get("DECAY_DATE") or "").strip())
+    return decay
+
+def _read_gcat_statuses(path="data/gcat_satcat.tsv"):
+    statuses = {}
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            norad = (row.get("Norad") or row.get("NORAD") or "").strip()
+            status = (row.get("Status") or "").strip()
+            if not norad or not status:
+                continue
+            statuses.setdefault(norad, set()).add(status)
+    return statuses
+
+_ORBIT_DECAYED_CODES = frozenset([
+    "R", "D", "L", "LF", "S", "F",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX",
+])
+
+_ORBIT_ACTIVE_CODES = frozenset(["O", "AO", "AO IN", "OX"])
+
+def _classify(status_set):
+    is_decayed = any(code in _ORBIT_DECAYED_CODES for code in status_set)
+    is_active = any(code in _ORBIT_ACTIVE_CODES for code in status_set)
+    return is_decayed, is_active
+
+def verify_disposition_disagreement(celestrak_path="data/celestrak_satcat.csv",
+                                     gcat_path="data/gcat_satcat.tsv"):
+    decay_flags = _read_celestrak_decay_flags(celestrak_path)
+    gcat_statuses = _read_gcat_statuses(gcat_path)
+
+    mismatch_count = 0
+    for norad, has_decay_date in decay_flags.items():
+        status_set = gcat_statuses.get(norad)
+        if status_set is None:
+            continue
+        is_decayed, is_active = _classify(status_set)
+        if is_decayed and not has_decay_date:
+            mismatch_count += 1
+        elif is_active and has_decay_date:
+            mismatch_count += 1
+
+    return mismatch_count
+
+if __name__ == "__main__":
+    count = verify_disposition_disagreement()
+    print(f"DispositionDisagreement (independent path): {count}")

@@ -1,0 +1,149 @@
+import json, sys, pathlib, collections, csv, re
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+NS = "https://gov.tesseract.academy/def/space#"
+
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT", "")[:6] for p in sat[n]}) > 1}),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Independent verification path for DispositionDisagreement.
+#
+# This does NOT call load_celestrak()/load_gcat() and does NOT reuse the
+# `ct`/`sat`/`st`/`ctdec` structures built in python_side(). It re-reads the
+# raw source files with its own low-level parsing (csv.reader by column
+# index for CelesTrak, manual tab-splitting with a hand-rolled header map for
+# GCAT) and re-derives the disagreement predicate from an explicit
+# truth-table / if-elif classifier instead of the boolean set-algebra
+# expression above. Two structurally unrelated implementations agreeing is
+# much stronger evidence than one implementation agreeing with itself.
+# ---------------------------------------------------------------------------
+
+def _raw_celestrak_decay_flags():
+    """norad -> True if CelesTrak records a decay date, parsed independently."""
+    decay = {}
+    known = set()
+    with open(DATA / "celestrak_satcat.csv", newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        idx_norad = header.index("NORAD_CAT_ID")
+        idx_decay = header.index("DECAY_DATE")
+        for row in reader:
+            if len(row) <= max(idx_norad, idx_decay):
+                continue
+            norad = row[idx_norad].strip()
+            if not norad:
+                continue
+            known.add(norad)
+            decay[norad] = len(row[idx_decay].strip()) > 0
+    return known, decay
+
+
+def _raw_gcat_statuses():
+    """norad -> set of GCAT phase status codes, parsed independently."""
+    statuses = collections.defaultdict(set)
+    with open(DATA / "gcat_satcat.tsv", encoding="utf-8", errors="replace") as f:
+        first = f.readline()
+        cols = [c.strip() for c in first.lstrip("#").rstrip("\n").split("\t")]
+        col_index = {name: i for i, name in enumerate(cols)}
+        i_satcat = col_index.get("Satcat")
+        i_status = col_index.get("Status")
+        if i_satcat is None or i_status is None:
+            raise RuntimeError("gcat_satcat.tsv missing expected columns")
+        for raw_line in f:
+            if raw_line.startswith("#"):
+                continue
+            fields = raw_line.rstrip("\n").split("\t")
+            if len(fields) <= max(i_satcat, i_status):
+                continue
+            satcat_field = fields[i_satcat].strip()
+            digits_only = re.fullmatch(r"\d+", satcat_field)
+            if not digits_only:
+                continue
+            norad = str(int(satcat_field))
+            statuses[norad].add(fields[i_status].strip())
+    return statuses
+
+
+def _classify_disagreement(gcat_status_set, celestrak_has_decay):
+    """Explicit branch-by-branch reformulation of the disagreement rule,
+    deliberately avoiding the set-boolean expression used in python_side()."""
+    is_gone = False
+    for code in gcat_status_set:
+        if code in GONE:
+            is_gone = True
+            break
+
+    is_left_earth_only = False
+    if not is_gone:
+        for code in gcat_status_set:
+            if code in LEFT_EARTH:
+                is_left_earth_only = True
+                break
+
+    if celestrak_has_decay and is_gone:
+        return False
+    if (not celestrak_has_decay) and (not is_gone):
+        return False
+    if celestrak_has_decay and is_left_earth_only:
+        return False
+    return True
+
+
+def independent_disposition_disagreement():
+    ct_norads, ct_decay = _raw_celestrak_decay_flags()
+    gcat_status = _raw_gcat_statuses()
+
+    count = 0
+    for norad in gcat_status:
+        if norad not in ct_norads:
+            continue
+        if _classify_disagreement(gcat_status[norad], ct_decay.get(norad, False)):
+            count += 1
+    return count
+
+
+def verify_disposition_disagreement(reported_value):
+    """Cross-check the DispositionDisagreement figure via the independent
+    path above. Exits non-zero on any disagreement between the two
+    computations, matching this pipeline's dual-computation gate policy."""
+    independent_value = independent_disposition_disagreement()
+    if independent_value != reported_value:
+        sys.stderr.write(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement mismatch "
+            "between primary and independent computations "
+            f"(primary={reported_value}, independent={independent_value}).\n"
+        )
+        sys.exit(1)
+    return independent_value
+
+
+if __name__ == "__main__":
+    metrics = python_side()
+    verify_disposition_disagreement(metrics["DispositionDisagreement"])
+    print(json.dumps(metrics, indent=2))

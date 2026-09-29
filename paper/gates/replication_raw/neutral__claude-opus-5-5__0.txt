@@ -1,0 +1,107 @@
+import csv
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from reconcile import GONE, LEFT_EARTH
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+
+def _celestrak_decay_flags(path=DATA / "celestrak_satcat.csv"):
+    """NORAD id -> True if CelesTrak records a decay date. Independent CSV read."""
+    flags = {}
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = [h.strip() for h in next(reader)]
+        i_id = header.index("NORAD_CAT_ID")
+        i_decay = header.index("DECAY_DATE")
+        width = len(header)
+        for row in reader:
+            if len(row) < width:
+                row = row + [""] * (width - len(row))
+            key = row[i_id].strip()
+            flags[key] = bool(row[i_decay].strip())
+    return flags
+
+
+def _gcat_phase_flags(path=DATA / "gcat_satcat.tsv"):
+    """NORAD id -> [any_gone, any_left_earth], folded row by row over all phases."""
+    flags = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        header = [h.strip() for h in f.readline().lstrip("#").rstrip("\n").split("\t")]
+        width = len(header)
+        i_sat = header.index("Satcat")
+        i_status = header.index("Status") if "Status" in header else None
+        for line in f:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < width:
+                continue
+            sat = fields[i_sat].strip()
+            if not sat.isdigit():
+                continue
+            key = str(int(sat))
+            status = fields[i_status].strip() if i_status is not None else ""
+            acc = flags.setdefault(key, [False, False])
+            if status in GONE:
+                acc[0] = True
+            if status in LEFT_EARTH:
+                acc[1] = True
+    return flags
+
+
+def _is_disagreement(gcat_gone, gcat_left_earth, ct_decayed):
+    """Explicit truth table for the disposition comparison."""
+    if gcat_gone and ct_decayed:
+        return False
+    if not gcat_gone and not ct_decayed:
+        return False
+    if gcat_gone and not ct_decayed:
+        return True
+    # not gcat_gone and ct_decayed: benign only if GCAT says it left Earth orbit
+    return not gcat_left_earth
+
+
+def recompute_disposition_disagreement():
+    """Second, independent computation of DispositionDisagreement.
+
+    Returns (count, sorted list of NORAD ids flagged).
+    """
+    ct = _celestrak_decay_flags()
+    gc = _gcat_phase_flags()
+    flagged = []
+    for norad, (gone, left) in gc.items():
+        if norad not in ct:
+            continue
+        if _is_disagreement(gone, left, ct[norad]):
+            flagged.append(norad)
+    flagged.sort(key=int)
+    return len(flagged), flagged
+
+
+def cross_check_disposition_disagreement(primary_count):
+    """Compare the primary count against the independent recomputation.
+
+    Returns True on agreement; prints diagnostics and returns False otherwise.
+    """
+    count, flagged = recompute_disposition_disagreement()
+    if count == primary_count:
+        print(f"DispositionDisagreement: primary={primary_count} verify={count} OK")
+        return True
+    print(
+        f"DispositionDisagreement MISMATCH: primary={primary_count} verify={count} "
+        f"(delta={count - primary_count}); first flagged ids: {flagged[:20]}",
+        file=sys.stderr,
+    )
+    return False
+
+
+if __name__ == "__main__":
+    from governance_report import python_side
+
+    primary = python_side()["DispositionDisagreement"]
+    sys.exit(0 if cross_check_disposition_disagreement(primary) else 1)

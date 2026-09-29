@@ -1,0 +1,70 @@
+```python
+# ---- pipeline/verify_disposition.py ----
+# Independent cross-check of DispositionDisagreement.
+# Deliberately does not import reconcile.py or governance_report.py,
+# and does not reuse their status-code constants, so a bug or typo in
+# one implementation cannot silently propagate into the other.
+
+import csv
+import os
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+
+# GCAT status codes classified independently from
+# planet4589.org/space/gcat/web/intro/phases.html
+NOT_IN_ORBIT_CODES = frozenset(
+    ["R", "D", "L", "LF", "S", "F", "AF", "AS", "AR", "AR IN", "AL", "AL IN", "TX"]
+)
+STILL_IN_ORBIT_CODES = frozenset(["O", "AO", "AO IN", "OX"])
+
+
+def read_celestrak_decay_flags(path=None):
+    path = path or os.path.join(DATA_DIR, "celestrak_satcat.csv")
+    decayed_by_norad = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            norad = (row.get("NORAD_CAT_ID") or "").strip()
+            if not norad:
+                continue
+            decay_date = (row.get("DECAY_DATE") or "").strip()
+            decayed_by_norad[norad] = bool(decay_date)
+    return decayed_by_norad
+
+
+def read_gcat_status_flags(path=None):
+    path = path or os.path.join(DATA_DIR, "gcat_satcat.tsv")
+    reported_not_in_orbit = {}
+    reported_still_in_orbit = {}
+    with open(path, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh, delimiter="\t"):
+            norad = (row.get("Norad") or row.get("NORAD") or "").strip()
+            if not norad or norad == "-":
+                continue
+            code = (row.get("Status") or "").strip()
+            if code in NOT_IN_ORBIT_CODES:
+                reported_not_in_orbit[norad] = True
+            if code in STILL_IN_ORBIT_CODES:
+                reported_still_in_orbit[norad] = True
+    return reported_not_in_orbit, reported_still_in_orbit
+
+
+def recompute_disposition_disagreement(celestrak_path=None, gcat_path=None):
+    decayed_by_norad = read_celestrak_decay_flags(celestrak_path)
+    reported_not_in_orbit, reported_still_in_orbit = read_gcat_status_flags(gcat_path)
+
+    disagreement_count = 0
+    for norad, has_decay_date in decayed_by_norad.items():
+        flagged_gone = reported_not_in_orbit.get(norad, False)
+        flagged_orbiting = reported_still_in_orbit.get(norad, False)
+
+        if flagged_gone and not has_decay_date:
+            disagreement_count += 1
+        elif flagged_orbiting and has_decay_date:
+            disagreement_count += 1
+
+    return disagreement_count
+
+
+if __name__ == "__main__":
+    print({"DispositionDisagreement": recompute_disposition_disagreement()})
+```

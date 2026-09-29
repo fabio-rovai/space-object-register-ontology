@@ -1,0 +1,69 @@
+\section{The failure}
+\label{sec:failure}
+
+Table~\ref{tab:gate} reproduces the gate's output on the published run, next to
+two later values for each count: the first correction, and the value after the
+check against object histories described in Section~\ref{sec:second}. The gate
+exited zero. Every count in this paper is a number of objects present in the
+catalogues concerned, and Appendix~\ref{app:ledger} tracks each disposition
+object through all three versions.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Gate output on the published run. Every row agreed between the two
+paths, and three rows were wrong. The first correction is the value published
+as a fix; the full-history value is the check in Section~\ref{sec:second}.}
+\label{tab:gate}
+\begin{tabular}{lrrcrr}
+\toprule
+Defect class & Python & SPARQL & Agree & First correction & Full history \\
+\midrule
+PhantomEntry              & 22    & 22    & yes & 22 & 22 \\
+PhantomEntryOnOrbit       & 1     & 1     & yes & 1 & 1 \\
+UndisclosedTrackingLoss   & 1{,}104 & 1{,}104 & yes & \textbf{1{,}094} & 1{,}094 \\
+DispositionDisagreement   & 932   & 932   & yes & \textbf{261} & \textbf{220} \\
+CoverageGap               & 900   & 900   & yes & \textbf{622} & 622 \\
+UnnumberedObject          & 605   & 605   & yes & 605 & 605 \\
+IdentifierCollision       & 3     & 3     & yes & 3 & 3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The three errors have different characters, and only the first is the
+common-mode failure this paper is about.
+
+\paragraph{Disposition disagreement: 932, then 261, then 220.}
+The count is the number of objects on which the two catalogues contradict each
+other about whether the object is still in orbit. The 932 comprised 163 objects
+GCAT records as gone while CelesTrak gives no decay date, and 769 objects
+CelesTrak records as decayed while GCAT does not record them as gone. Producing
+the count requires reading GCAT's status codes, and the pre-correction rule was
+simple: a status in a set named \texttt{GONE} meant the object was gone, and
+every other status meant it was still in orbit. That default did most of the
+damage. Of the 769, 640 were objects whose GCAT record ends in a code that marks
+a transition rather than a fate, such as docking, attachment, transfer or
+renaming, and 500 of those were docking or attachment specifically. Another 57
+ended in an explosion or a collision. The first correction removed 998
+transition-coded objects from the comparison, 640 of which had been counted as
+disagreements, and reclassified explosion and collision as destruction, giving
+261. The ledger in Appendix~\ref{app:ledger} accounts for every object that
+entered or left. Section~\ref{sec:second} shows that 261 was itself wrong.
+
+\paragraph{Coverage gap: 900 against 622.}
+The pipeline checked three of the four main catalogue files the source
+publishes. The fourth was listed on the same index page and never fetched. It
+holds 354 objects, 278 of which were being counted as absent from a catalogue
+that contains them.
+
+\paragraph{Undisclosed tracking loss: 1,104 against 1,094.}
+Ten of the 1,104 objects do carry the CelesTrak field whose absence the count
+is about. Correcting this strengthened the finding. The field is maintained and
+set on 1,292 objects across the catalogue, ten of them among the 1,104, so the
+claim moved from ``this register cannot record tracking loss'' to ``this
+register records tracking loss and does not record it for 1,094 objects.''
+
+None of the three errors is visible to a redundancy check, and only the first is
+common-mode in the strict sense. What unites them is that each is an error about
+what the source data means or contains, and the gate compares only what two
+implementations derive from it.

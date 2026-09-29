@@ -1,0 +1,123 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+
+
+def disposition_disagreement_independent():
+    """Second, independently-written computation of DispositionDisagreement.
+
+    This deliberately avoids every shortcut taken by python_side():
+
+      * it re-reads the source catalogues itself rather than reusing any
+        precomputed structure (e.g. the `st` status-set dict) built by the
+        primary computation, so a bug in that shared structure cannot
+        silently propagate into both numbers;
+      * it drives the loop from the CelesTrak table outward to GCAT, the
+        opposite traversal direction of python_side() (which drives from
+        the GCAT `sat` dict outward to CelesTrak);
+      * it evaluates the per-object phase history with an explicit
+        state-machine (plain booleans set inside a for-loop) instead of a
+        single combined boolean expression over set intersections.
+
+    Semantically it encodes the same rule as python_side()'s
+    "DispositionDisagreement" formula: an object disagrees if GCAT considers
+    it GONE (based on any phase's status) and CelesTrak's decay-date field
+    disagree, UNLESS CelesTrak recorded a decay for an object that GCAT
+    instead shows as having left Earth's catalog scope (LEFT_EARTH) without
+    ever being marked GONE -- that combination is a known, legitimate,
+    non-disagreeing case (e.g. lunar/interplanetary departure).
+
+    Returns the set of offending NORAD IDs (not just a count) so callers can
+    diff it against a similarly-exposed set from the primary path if one is
+    ever added, for easier debugging of any divergence.
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+
+    offenders = set()
+    for norad, ct_row in ct.items():
+        phases = sat.get(norad)
+        if not phases:
+            # Not present in GCAT's satcat at all; out of scope for this
+            # particular metric (that gap is what CoverageGap measures).
+            continue
+
+        decayed_on_celestrak = bool(ct_row["DECAY_DATE"].strip())
+
+        has_gone_status = False
+        has_left_earth_status = False
+        for phase in phases:
+            status = phase.get("Status", "").strip()
+            if status in GONE:
+                has_gone_status = True
+            if status in LEFT_EARTH:
+                has_left_earth_status = True
+
+        legitimate_left_earth_exception = (
+            decayed_on_celestrak
+            and has_left_earth_status
+            and not has_gone_status
+        )
+
+        disagree = (has_gone_status != decayed_on_celestrak) and not legitimate_left_earth_exception
+
+        if disagree:
+            offenders.add(norad)
+
+    return offenders
+
+
+def verify_disposition_disagreement(python_side_result=None):
+    """Cross-check python_side()'s DispositionDisagreement count against the
+    independent recomputation above. Exits non-zero on any mismatch, per the
+    module's dual-computation governance gate policy.
+    """
+    reported = python_side_result if python_side_result is not None else python_side()
+    reported_count = reported["DispositionDisagreement"]
+
+    independent_offenders = disposition_disagreement_independent()
+    independent_count = len(independent_offenders)
+
+    if reported_count != independent_count:
+        sys.stderr.write(
+            "GOVERNANCE GATE FAILURE: DispositionDisagreement mismatch between "
+            "independent computations\n"
+            f"  primary (python_side)          : {reported_count}\n"
+            f"  independent verification path  : {independent_count}\n"
+            f"  sample independent offenders    : {sorted(independent_offenders)[:20]}\n"
+        )
+        sys.exit(1)
+
+    return independent_count
+
+
+if __name__ == "__main__":
+    result = python_side()
+    verify_disposition_disagreement(result)
+    print(json.dumps(result, indent=2))

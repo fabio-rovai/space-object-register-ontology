@@ -1,0 +1,166 @@
+"""pipeline/verify_disposition.py
+
+Independent re-derivation of the DispositionDisagreement metric.
+
+This module recomputes the disposition-disagreement count between the
+CelesTrak SATCAT and the McDowell GCAT satcat table using an entirely
+separate code path: its own file readers, its own status-classification
+table (transcribed independently from the GCAT phase/status
+documentation), and its own aggregation logic. It shares no functions,
+no classes and no module-level constants with pipeline/reconcile.py or
+pipeline/governance_report.py.
+
+Its sole purpose is to act as a second, independent witness for the
+DispositionDisagreement figure produced by governance_report.py's
+python_side(). If the two numbers differ, that indicates a bug in one
+of the two implementations (or a genuinely ambiguous data case) and the
+pipeline should fail loudly rather than silently trusting one figure.
+"""
+import csv
+import pathlib
+import sys
+
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_DATA = _ROOT / "data"
+
+csv.field_size_limit(10_000_000)
+
+# --------------------------------------------------------------------------
+# Status classification, transcribed independently from
+# planet4589.org/space/gcat/web/intro/phases.html (GCAT release 1.8.8).
+#
+# Only three buckets are needed for this check:
+#   "EARTH_END" -- the phase records the object's destruction, reentry,
+#                  landing, or launch/attachment failure at/around Earth
+#                  (i.e. the object is physically gone from Earth orbit).
+#   "SOI_EXIT"  -- the phase records the object leaving Earth's sphere of
+#                  influence for deep space or another body (it still
+#                  exists, it is just no longer an Earth-orbiting object).
+#   "BAD_ROW"   -- the catalog entry does not correspond to a real object.
+# Every status code not listed here is left unclassified (None), i.e. the
+# object is still treated as "present" for the purposes of this check.
+# --------------------------------------------------------------------------
+_STATUS_TABLE = {
+    "R": "EARTH_END", "D": "EARTH_END", "L": "EARTH_END", "LF": "EARTH_END",
+    "S": "EARTH_END", "F": "EARTH_END", "AF": "EARTH_END", "AS": "EARTH_END",
+    "AR": "EARTH_END", "AR IN": "EARTH_END", "AL": "EARTH_END",
+    "AL IN": "EARTH_END", "TX": "EARTH_END",
+    "DSO": "SOI_EXIT", "DSA": "SOI_EXIT", "DSA IN": "SOI_EXIT",
+    "EO": "SOI_EXIT", "EAO": "SOI_EXIT", "EN": "SOI_EXIT", "OI": "SOI_EXIT",
+    "OE": "SOI_EXIT", "LO": "SOI_EXIT", "LOA": "SOI_EXIT",
+    "ERR": "BAD_ROW",
+}
+
+
+def _norad_key(raw):
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return str(int(raw))
+    except ValueError:
+        return None
+
+
+def _read_celestrak_decay_flags():
+    """norad id -> True if CelesTrak records a non-blank DECAY_DATE."""
+    flags = {}
+    path = _DATA / "celestrak_satcat.csv"
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = next(reader)
+        idx_id = header.index("NORAD_CAT_ID")
+        idx_decay = header.index("DECAY_DATE")
+        for row in reader:
+            if len(row) <= max(idx_id, idx_decay):
+                continue
+            key = _norad_key(row[idx_id])
+            if key is None:
+                continue
+            flags[key] = bool(row[idx_decay].strip())
+    return flags
+
+
+def _read_gcat_satcat_phase_kinds():
+    """norad id -> set of classification labels seen across all of that
+    object's GCAT phases (labels drawn from _STATUS_TABLE, or None for
+    unclassified statuses)."""
+    path = _DATA / "gcat_satcat.tsv"
+    kinds = {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        first = fh.readline()
+        columns = [c.strip() for c in first.lstrip("#").rstrip("\n").split("\t")]
+        try:
+            i_satcat = columns.index("Satcat")
+            i_status = columns.index("Status")
+        except ValueError:
+            return kinds
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            cells = line.rstrip("\n").split("\t")
+            if len(cells) <= max(i_satcat, i_status):
+                continue
+            key = _norad_key(cells[i_satcat])
+            if key is None:
+                continue
+            status = cells[i_status].strip()
+            kinds.setdefault(key, set()).add(_STATUS_TABLE.get(status))
+    return kinds
+
+
+def independent_disposition_disagreement():
+    """Recompute the DispositionDisagreement headline number from scratch,
+    using file-reading and classification logic entirely separate from
+    pipeline/reconcile.py and pipeline/governance_report.py."""
+    decayed = _read_celestrak_decay_flags()
+    phase_kinds = _read_gcat_satcat_phase_kinds()
+
+    count = 0
+    for norad_id, kinds in phase_kinds.items():
+        if norad_id not in decayed:
+            continue  # only objects present in both catalogues are in scope
+
+        ended_at_earth = "EARTH_END" in kinds
+        exited_soi = "SOI_EXIT" in kinds
+        marked_decayed = decayed[norad_id]
+
+        mismatch = ended_at_earth != marked_decayed
+
+        # An object CelesTrak marks decayed whose only GCAT departure
+        # record is an SOI exit (deep space / other body) rather than an
+        # actual Earth reentry is not a genuine disagreement: both sources
+        # agree the object left Earth orbit, they just record it
+        # differently.
+        if marked_decayed and exited_soi and not ended_at_earth:
+            mismatch = False
+
+        if mismatch:
+            count += 1
+
+    return count
+
+
+def _cross_check():
+    """Standalone check: compare this module's independently derived
+    figure against the one produced by governance_report.py's
+    dual-computation gate. Exits non-zero on any disagreement."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side  # comparison only, not reused logic
+
+    mine = independent_disposition_disagreement()
+    theirs = python_side()["DispositionDisagreement"]
+
+    if mine != theirs:
+        print(
+            f"DispositionDisagreement MISMATCH: independent={mine} "
+            f"governance_report={theirs}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"DispositionDisagreement cross-check OK: {mine}")
+
+
+if __name__ == "__main__":
+    _cross_check()

@@ -1,0 +1,111 @@
+import json, sys, pathlib, collections
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import rdflib
+from reconcile import load_celestrak, load_gcat, GONE, LEFT_EARTH, ERROR, LOST
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+NS = "https://gov.tesseract.academy/def/space#"
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": len({
+            n for n in sat if n in ct
+            and (bool(st[n] & GONE) != (n in ctdec))
+            and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))}),
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+
+
+def disposition_disagreement_recount():
+    """Independent, non-set-comprehension recomputation of DispositionDisagreement.
+
+    Walks each object's phases explicitly (rather than building GONE/LEFT_EARTH
+    status-set intersections in one expression) so this path is structurally
+    different from python_side() and can catch logic errors that a shared
+    formulation would silently reproduce.
+    """
+    ct = load_celestrak()
+    sat, _, _ = load_gcat("gcat_satcat.tsv")
+
+    ctdec = set()
+    for n, row in ct.items():
+        if row["DECAY_DATE"].strip():
+            ctdec.add(n)
+
+    disagreeing = []
+    for n, phases in sat.items():
+        if n not in ct:
+            continue
+
+        saw_gone = False
+        saw_left_earth = False
+        for p in phases:
+            status = p.get("Status", "").strip()
+            if status in GONE:
+                saw_gone = True
+            elif status in LEFT_EARTH:
+                saw_left_earth = True
+
+        is_decayed_ct = n in ctdec
+
+        if saw_gone == is_decayed_ct:
+            # both sides agree the object is gone, or both agree it isn't
+            continue
+
+        # Sole permitted exception: CelesTrak marks it decayed, GCAT never
+        # recorded a terminal GONE phase, but it did record a LEFT_EARTH
+        # phase (e.g. departed Earth orbit rather than reentered/deorbited).
+        if is_decayed_ct and (not saw_gone) and saw_left_earth:
+            continue
+
+        disagreeing.append(n)
+
+    return len(set(disagreeing))
+
+
+def verify_disposition_disagreement(primary_result=None, exit_on_mismatch=True):
+    """Cross-check python_side()'s DispositionDisagreement against the
+    independently-coded recount. Exits non-zero on disagreement between the
+    two Python computations, before SPARQL cross-checking even runs.
+    """
+    if primary_result is None:
+        primary_result = python_side()
+
+    primary_count = primary_result["DispositionDisagreement"]
+    recount = disposition_disagreement_recount()
+
+    if primary_count != recount:
+        msg = (
+            f"DispositionDisagreement verification FAILED: "
+            f"python_side()={primary_count} recount={recount}"
+        )
+        print(msg, file=sys.stderr)
+        if exit_on_mismatch:
+            sys.exit(1)
+        return False
+
+    print(
+        f"DispositionDisagreement verification OK: "
+        f"both computations agree on {primary_count}",
+        file=sys.stderr,
+    )
+    return True
+
+
+if __name__ == "__main__":
+    result = python_side()
+    verify_disposition_disagreement(result)
+    print(json.dumps(result, indent=2))

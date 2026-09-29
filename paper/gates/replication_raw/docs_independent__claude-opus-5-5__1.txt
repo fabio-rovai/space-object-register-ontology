@@ -1,0 +1,183 @@
+# pipeline/verify_disposition.py
+"""Independent second computation of DispositionDisagreement.
+
+Shares no code or constants with reconcile.py or governance_report.py:
+  * status taxonomy re-transcribed from GCAT 'Phases and Status Values'
+    (planet4589.org/space/gcat/web/intro/phases.html, GCAT 1.8.8),
+    so a transcription error in reconcile.GONE / LEFT_EARTH will surface
+    as a mismatch;
+  * files parsed with the csv module (tab dialect for GCAT) rather than
+    reconcile's manual split;
+  * NORAD IDs normalised to int on BOTH sides (reconcile only int-normalises
+    GCAT; any zero-padding in CelesTrak will show up as a mismatch);
+  * count built as two disjoint directional tallies, not one set expression;
+  * status values not in the documented table are reported, never silently
+    treated as "not gone".
+
+Metric definition (same as the primary path):
+  object N present in both GCAT satcat and CelesTrak, where
+  (any GCAT phase of N ends in a destroyed/landed status) != (CelesTrak has a
+  DECAY_DATE), excluding objects CelesTrak marks decayed whose GCAT phases show
+  departure from Earth orbit and no destroyed/landed status.
+
+Exit codes: 0 agree, 1 disagree, 2 undocumented status values found.
+"""
+import csv
+import sys
+import pathlib
+import collections
+
+csv.field_size_limit(10_000_000)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+# Transcribed from the documentation table, one entry per status value.
+# Category: what the END of a phase with this status means for the object.
+#   ended    - destroyed, reentered, landed or crashed (no longer in orbit)
+#   departed - left Earth's sphere of influence / deep space / other body orbit
+#   orbit    - still in (or plausibly in) orbit at end of phase
+#   trans    - transition to another phase/object/name; not terminal by itself
+#   error    - no real object
+# Note: L, TX, etc. can refer to a non-Earth body C (Dest column). The metric,
+# as defined by the primary path, classifies by status alone; that is preserved
+# here so the two paths measure the same thing.
+DOC_STATUS = {
+    # t2 and Dest both empty
+    "O": "orbit", "AO": "orbit", "AO IN": "orbit",
+    "UDK": "trans", "REL": "trans", "DEP": "trans",
+    "TO": "trans", "TOA": "trans", "ALO": "trans",
+    "OX": "orbit",
+    # Dest blank, t2 set
+    "E": "trans", "N": "trans", "NA": "trans", "LEASE": "trans",
+    # Dest is a location on C / C / blank
+    "S": "ended", "R": "ended", "D": "ended", "L": "ended", "LF": "ended",
+    "AS": "ended", "AR": "ended", "AR IN": "ended",
+    "AL": "ended", "AL IN": "ended", "TX": "ended",
+    "F": "ended", "AF": "ended",
+    # Dest is a D-catalog JCAT
+    "DSO": "departed", "DSA": "departed", "DSA IN": "departed",
+    "LO": "departed", "LOA": "departed",
+    # Dest is a main-catalog JCAT
+    "DK": "trans", "GRP": "trans", "ATT": "trans", "TFR": "trans",
+    "TFR E": "trans", "TFR IN": "trans", "C": "trans",
+    "EVA DP": "trans", "EVA RP": "trans", "REFLT": "trans",
+    # Dest is a body name
+    "EO": "departed", "EAO": "departed", "EN": "departed",
+    "OI": "departed", "OE": "departed",
+    # Special
+    "ERR": "error",
+}
+
+
+def _norad(value):
+    v = (value or "").strip()
+    return int(v) if v.isdigit() else None
+
+
+def read_celestrak_decay():
+    """Return {norad_int: has_decay_date}."""
+    out = {}
+    with open(DATA / "celestrak_satcat.csv", newline="",
+              encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = [h.strip() for h in next(reader)]
+        i_id = header.index("NORAD_CAT_ID")
+        i_dec = header.index("DECAY_DATE")
+        for row in reader:
+            if len(row) <= max(i_id, i_dec):
+                continue
+            n = _norad(row[i_id])
+            if n is None:
+                continue
+            out[n] = bool(row[i_dec].strip())
+    return out
+
+
+def read_gcat_statuses(name):
+    """Return ({norad_int: [status, ...]}, skipped_short_rows)."""
+    phases = collections.defaultdict(list)
+    skipped = 0
+    with open(DATA / name, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
+        header = None
+        for row in reader:
+            if not row:
+                continue
+            if header is None:
+                row[0] = row[0].lstrip("#")
+                header = [h.strip() for h in row]
+                i_sat = header.index("Satcat")
+                i_st = header.index("Status")
+                continue
+            if row[0].startswith("#"):
+                continue
+            if len(row) < len(header):
+                skipped += 1
+                continue
+            n = _norad(row[i_sat])
+            if n is None:
+                continue
+            phases[n].append(row[i_st].strip())
+    return phases, skipped
+
+
+def disposition_disagreement():
+    decay = read_celestrak_decay()
+    gcat, skipped = read_gcat_statuses("gcat_satcat.tsv")
+
+    undocumented = collections.Counter()
+    gcat_gone_ct_alive = 0      # GCAT says ended, CelesTrak has no decay date
+    ct_decayed_gcat_alive = 0   # CelesTrak decayed, GCAT neither ended nor departed
+
+    for n, sts in gcat.items():
+        if n not in decay:
+            continue
+        cats = set()
+        for s in sts:
+            c = DOC_STATUS.get(s)
+            if c is None:
+                undocumented[s] += 1
+            else:
+                cats.add(c)
+        g_ended = "ended" in cats
+        g_departed = "departed" in cats
+        ct_decayed = decay[n]
+
+        if g_ended and not ct_decayed:
+            gcat_gone_ct_alive += 1
+        elif ct_decayed and not g_ended and not g_departed:
+            ct_decayed_gcat_alive += 1
+
+    return {
+        "DispositionDisagreement": gcat_gone_ct_alive + ct_decayed_gcat_alive,
+        "gcat_ended_celestrak_not_decayed": gcat_gone_ct_alive,
+        "celestrak_decayed_gcat_not_ended": ct_decayed_gcat_alive,
+        "gcat_rows_skipped_short": skipped,
+        "undocumented_status_values": dict(undocumented),
+    }
+
+
+def main():
+    result = disposition_disagreement()
+    for k, v in result.items():
+        print(f"{k}: {v}")
+
+    if result["undocumented_status_values"]:
+        print("FAIL: GCAT contains status values not in the documented table",
+              file=sys.stderr)
+        sys.exit(2)
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+    primary = python_side()["DispositionDisagreement"]
+    independent = result["DispositionDisagreement"]
+    print(f"primary: {primary}  independent: {independent}")
+    if primary != independent:
+        print("FAIL: DispositionDisagreement mismatch between primary and "
+              "independent computation", file=sys.stderr)
+        sys.exit(1)
+    print("OK: DispositionDisagreement agrees")
+
+
+if __name__ == "__main__":
+    main()

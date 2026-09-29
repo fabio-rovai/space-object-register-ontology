@@ -40,16 +40,26 @@ class TestStatusSemantics(unittest.TestCase):
         self.assertIn("ERR", ERROR)
         self.assertIn("OX", LOST)
 
-    def test_destruction_codes_are_not_in_orbit(self):
-        """Regression for the error that inflated disagreement by 3.6x.
+    def test_explosion_and_collision_are_not_read_as_in_orbit(self):
+        """Regression for the default that produced the wrong 932.
 
-        E and C destroy the object. They were originally classified as
-        "still in orbit", which is what produced the wrong 932.
+        E and C were silently read as "still in orbit". They must be classified
+        explicitly and never as in orbit on their own.
         """
         from reconcile import DESTROYED, INORBIT
-        self.assertIn("E", DESTROYED)
-        self.assertIn("C", DESTROYED)
+        self.assertNotIn("E", INORBIT)
+        self.assertNotIn("C", INORBIT)
         self.assertEqual(DESTROYED & INORBIT, set())
+
+    @unittest.expectedFailure
+    def test_explosion_is_a_phase_boundary_not_a_destruction(self):
+        """KNOWN ISSUE (29 Sep 2026). GCAT: after E the "next phase of this
+        object is a debris fragment", so E is not a destruction. The pipeline
+        still files it in DESTROYED; the full-history count is 220, not 261
+        (paper/gates/history_check.py). Remove expectedFailure when the
+        pipeline reads GCAT's event catalogue."""
+        from reconcile import DESTROYED
+        self.assertNotIn("E", DESTROYED)
 
     def test_transitions_are_not_disposition_claims(self):
         """Docking and attachment end a phase without ending the object."""

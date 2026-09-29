@@ -1,0 +1,54 @@
+import collections
+
+# ---- pipeline/governance_report.py ----
+from reconcile import load_celestrak, load_gcat, statuses, GONE, INORBIT, LEFT_EARTH, ERROR, LOST
+
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    st = {n: statuses(v) for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    both = set(ct) & set(sat)
+    gone = {n for n in both if st[n] & GONE}
+    inorb = {n for n in both if st[n] & INORBIT}
+    return {"DispositionDisagreement": len((gone - ctdec) | (inorb & ctdec))}
+
+def python_side_independent():
+    """Recomputes DispositionDisagreement from raw GCAT rows (bypassing the
+    by_norad dict) using per-record boolean logic instead of set algebra, so a
+    bug in either the by_norad aggregation or the set-union formula in
+    python_side() will surface as a disagreement between the two counts."""
+    ct = load_celestrak()
+    _, rows, _ = load_gcat("gcat_satcat.tsv")
+
+    status_by_norad = collections.defaultdict(set)
+    for r in rows:
+        norad = r.get("Satcat", "").strip()
+        if not norad.isdigit():
+            continue
+        status_by_norad[str(int(norad))].add(r.get("Status", "").strip())
+
+    mismatch = 0
+    for norad, ct_row in ct.items():
+        st = status_by_norad.get(norad)
+        if st is None:
+            continue
+        has_decay = bool(ct_row["DECAY_DATE"].strip())
+        is_gone = any(code in GONE for code in st)
+        is_inorbit = any(code in INORBIT for code in st)
+        if is_gone and not has_decay:
+            mismatch += 1
+        elif is_inorbit and has_decay:
+            mismatch += 1
+
+    return {"DispositionDisagreement": mismatch}
+
+def verify_disposition_disagreement():
+    primary = python_side()["DispositionDisagreement"]
+    check = python_side_independent()["DispositionDisagreement"]
+    if primary != check:
+        raise ValueError(
+            f"DispositionDisagreement cross-check failed: "
+            f"python_side={primary} python_side_independent={check}"
+        )
+    return primary

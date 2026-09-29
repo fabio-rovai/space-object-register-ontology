@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""Independent verification path for the DispositionDisagreement count.
+
+This module deliberately imports nothing from pipeline/reconcile.py or
+pipeline/governance_report.py. The status vocabulary is transcribed directly
+from the GCAT documentation (J. C. McDowell, 'Phases and Status Values',
+https://planet4589.org/space/gcat/web/intro/phases.html, GCAT release 1.8.8,
+retrieved 29 Sep 2026). Each code is filed under the documentation section it
+appears in, and disposition classes are derived from those sections rather
+than from hand-picked code lists.
+
+Definition being verified (per object, keyed by NORAD number):
+  - the object appears in both CelesTrak SATCAT and GCAT satcat;
+  - GCAT "gone" := at least one phase has a status from the section
+    "Dest is a location on C, or C itself, or blank" (surface/destroyed);
+  - CelesTrak "gone" := DECAY_DATE is non-empty;
+  - a disagreement is GCAT gone != CelesTrak gone, EXCEPT where CelesTrak
+    says decayed, GCAT says not gone, and GCAT has a phase that left Earth
+    (sections "Dest is a JCAT from D catalog" or "Dest is a body name").
+
+Usage:
+  python pipeline/verify_disposition.py [--data DIR] [--expect N] [--strict]
+
+Exit codes:
+  0  computed (and matches --expect, if given)
+  1  mismatch against --expect
+  2  --strict and undocumented/blank GCAT status values were encountered
+  3  input files missing or unreadable
+"""
+import argparse
+import csv
+import json
+import pathlib
+import re
+import sys
+
+# Status codes grouped by the documentation section they appear under.
+# Transcribed independently from the source page; do not replace with
+# references to constants elsewhere in the pipeline.
+_DOC_SECTIONS = {
+    "t2_and_dest_empty": (
+        "O", "AO", "AO IN", "UDK", "REL", "DEP", "TO", "TOA", "ALO", "OX",
+    ),
+    "dest_blank_t2_set": (
+        "E", "N", "NA", "LEASE",
+    ),
+    "dest_location_on_c": (
+        "S", "R", "D", "L", "LF", "AS", "AR", "AR IN", "AL", "AL IN",
+        "TX", "F", "AF",
+    ),
+    "dest_deep_space_jcat": (
+        "DSO", "DSA", "DSA IN", "LO", "LOA",
+    ),
+    "dest_main_jcat": (
+        "DK", "GRP", "ATT", "TFR", "TFR E", "TFR IN", "RET", "C",
+        "EVA DP", "EVA RP", "REFLT",
+    ),
+    "dest_body_name": (
+        "EO", "EAO", "EN", "OI", "OE",
+    ),
+    "special": (
+        "ERR",
+    ),
+}
+
+_SECTION_OF = {}
+for _section, _codes in _DOC_SECTIONS.items():
+    for _code in _codes:
+        if _code in _SECTION_OF:
+            raise RuntimeError(f"status {_code!r} filed under two sections")
+        _SECTION_OF[_code] = _section
+
+_TERMINAL_SECTIONS = frozenset({"dest_location_on_c"})
+_DEPARTED_SECTIONS = frozenset({"dest_deep_space_jcat", "dest_body_name"})
+
+_DIGITS = re.compile(r"^\s*(\d+)\s*$")
+_WS = re.compile(r"\s+")
+
+
+def _norm_status(raw):
+    return _WS.sub(" ", raw or "").strip().upper()
+
+
+def _norm_id(raw):
+    m = _DIGITS.match(raw or "")
+    return int(m.group(1)) if m else None
+
+
+def read_celestrak(path):
+    """Map int NORAD id -> True if CelesTrak records a decay date."""
+    decayed = {}
+    bad_ids = 0
+    with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip().lstrip("\ufeff") for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise SystemExit(f"CelesTrak header missing column: {exc}") from None
+        width = max(i_id, i_dec) + 1
+        for fields in reader:
+            if len(fields) < width:
+                bad_ids += 1
+                continue
+            nid = _norm_id(fields[i_id])
+            if nid is None:
+                bad_ids += 1
+                continue
+            decayed[nid] = bool(fields[i_dec].strip())
+    return decayed, bad_ids
+
+
+def read_gcat_statuses(path):
+    """Map int NORAD id -> set of normalised status codes over all phases."""
+    by_id = {}
+    short_rows = 0
+    header = None
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        for lineno, line in enumerate(fh):
+            line = line.rstrip("\r\n")
+            if header is None:
+                if not line.startswith("#"):
+                    raise SystemExit(f"{path}: expected '#' header on line 1")
+                header = [c.strip() for c in line[1:].split("\t")]
+                try:
+                    i_sat = header.index("Satcat")
+                    i_st = header.index("Status")
+                except ValueError as exc:
+                    raise SystemExit(f"{path}: header missing column: {exc}") from None
+                continue
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if len(cols) < len(header):
+                short_rows += 1
+                continue
+            nid = _norm_id(cols[i_sat])
+            if nid is None:
+                continue
+            by_id.setdefault(nid, set()).add(_norm_status(cols[i_st]))
+    if header is None:
+        raise SystemExit(f"{path}: empty file")
+    return by_id, short_rows
+
+
+def count_disagreements(ct_decayed, gcat_statuses):
+    total = 0
+    both_gone_disagree_ct_only = 0
+    both_gone_disagree_gcat_only = 0
+    excused_departed = 0
+    undocumented = {}
+    for nid, codes in gcat_statuses.items():
+        if nid not in ct_decayed:
+            continue
+        sections = set()
+        for code in codes:
+            sec = _SECTION_OF.get(code)
+            if sec is None:
+                undocumented[code] = undocumented.get(code, 0) + 1
+            else:
+                sections.add(sec)
+        gcat_gone = not sections.isdisjoint(_TERMINAL_SECTIONS)
+        gcat_departed = not sections.isdisjoint(_DEPARTED_SECTIONS)
+        ct_gone = ct_decayed[nid]
+
+        if gcat_gone == ct_gone:
+            continue
+        if ct_gone and not gcat_gone and gcat_departed:
+            excused_departed += 1
+            continue
+        total += 1
+        if ct_gone:
+            both_gone_disagree_ct_only += 1
+        else:
+            both_gone_disagree_gcat_only += 1
+    return total, {
+        "celestrak_decayed_gcat_not": both_gone_disagree_ct_only,
+        "gcat_gone_celestrak_not": both_gone_disagree_gcat_only,
+        "excused_left_earth": excused_departed,
+        "undocumented_status_values": dict(sorted(undocumented.items())),
+    }
+
+
+def main(argv=None):
+    here = pathlib.Path(__file__).resolve().parent
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--data", type=pathlib.Path, default=here.parent / "data")
+    ap.add_argument("--expect", type=int, default=None,
+                    help="value from the primary path; exit 1 if different")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 2 if GCAT contains status values not in the documentation")
+    args = ap.parse_args(argv)
+
+    ct_path = args.data / "celestrak_satcat.csv"
+    gc_path = args.data / "gcat_satcat.tsv"
+    for p in (ct_path, gc_path):
+        if not p.is_file():
+            print(json.dumps({"error": f"missing input {p}"}), file=sys.stderr)
+            return 3
+
+    ct_decayed, ct_bad = read_celestrak(ct_path)
+    gcat, gc_short = read_gcat_statuses(gc_path)
+    n, detail = count_disagreements(ct_decayed, gcat)
+
+    report = {
+        "DispositionDisagreement": n,
+        "method": "independent/doc-section-derived",
+        "source_doc": "https://planet4589.org/space/gcat/web/intro/phases.html (GCAT 1.8.8)",
+        "diagnostics": {
+            "celestrak_objects": len(ct_decayed),
+            "celestrak_rows_skipped": ct_bad,
+            "gcat_numbered_objects": len(gcat),
+            "gcat_rows_skipped_short": gc_short,
+            "objects_in_both": sum(1 for k in gcat if k in ct_decayed),
+            **detail,
+        },
+    }
+
+    rc = 0
+    if args.expect is not None:
+        report["expected"] = args.expect
+        report["match"] = (args.expect == n)
+        if args.expect != n:
+            rc = 1
+    if args.strict and detail["undocumented_status_values"] and rc == 0:
+        rc = 2
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

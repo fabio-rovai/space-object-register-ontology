@@ -1,0 +1,628 @@
+{
+  "freeze_date": "2026-08-18",
+  "ecat_file": "gcat_ecat_20260928.tsv",
+  "ecat_phases_dropped_after_freeze": 19,
+  "shared_objects": 69390,
+  "published_corrected_count_v1": 261,
+  "full_history_count_v2": 220,
+  "full_history_count_if_unsucceeded_E_is_destroyed": 222,
+  "kinds": {
+    "gone": 35134,
+    "inorbit": 33690,
+    "left": 516,
+    "unrecorded": 28,
+    "error": 22
+  },
+  "unrecorded_by_last_status": {
+    "E": 12,
+    "LEASE": 14,
+    "N": 1,
+    "REFLT": 1
+  },
+  "v1_only_count": 42,
+  "v2_only_count": 1,
+  "v1_only_by_first_status_and_ct_orbit_type": {
+    "E|ORB": 30,
+    "C|ORB": 12
+  },
+  "v2_only_by_first_status_and_ct_orbit_type": {
+    "ATT|ORB": 1
+  },
+  "v2_by_first_status_and_ct_orbit_type": {
+    "R|ORB": 154,
+    "OX|IMP": 31,
+    "D|ORB": 14,
+    "O|IMP": 14,
+    "AR|ORB": 4,
+    "C|ORB": 2,
+    "ATT|ORB": 1
+  },
+  "v1_residue_C_E_objects": {
+    "1244": {
+      "name": "GGSE 2",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S01244:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "1292": {
+      "name": "GGSE 3",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S01292:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "3504": {
+      "name": "COSMOS 249",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S03504:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "3530": {
+      "name": "COSMOS 252",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S03530:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "3616": {
+      "name": "DELTA 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S03616:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "4367": {
+      "name": "THORAD AGENA D R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S04367:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "4594": {
+      "name": "COSMOS 374",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S04594:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "4598": {
+      "name": "COSMOS 375",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S04598:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "6127": {
+      "name": "DELTA 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S06127:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "6921": {
+      "name": "DELTA 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S06921:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "7219": {
+      "name": "THOR BURNER 2A R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S07219:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "7532": {
+      "name": "THORAD DELTA 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "unrecorded",
+          "E",
+          "S07532:E"
+        ]
+      ],
+      "in_v2": false
+    },
+    "7616": {
+      "name": "DELTA 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "unrecorded",
+          "E",
+          "S07616:E"
+        ]
+      ],
+      "in_v2": false
+    },
+    "9063": {
+      "name": "DELTA 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S09063:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "9634": {
+      "name": "COSMOS 886",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S09634:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "10144": {
+      "name": "DELTA 1 R/B(1)",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S10144:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "10531": {
+      "name": "COSMOS 970",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S10531:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "10704": {
+      "name": "DELTA 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S10704:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "11765": {
+      "name": "COSMOS 1174",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S11765:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "13475": {
+      "name": "COSMOS 926 DEB",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "gone",
+          "C",
+          "S13475:C"
+        ]
+      ],
+      "in_v2": true
+    },
+    "14064": {
+      "name": "COSMOS 1461",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S14064:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "15876": {
+      "name": "ARIANE 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S15876:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "16615": {
+      "name": "ARIANE 1 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S16615:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "18985": {
+      "name": "COSMOS 1934",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S18985:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "19122": {
+      "name": "ARIANE 2 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S19122:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "19622": {
+      "name": "ARIANE 2 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S19622:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "19689": {
+      "name": "ARIANE 44LP R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S19689:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "19773": {
+      "name": "ARIANE 2 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S19773:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "19920": {
+      "name": "ARIANE 2 R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S19920:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "20170": {
+      "name": "ARIANE 44LP R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S20170:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "22675": {
+      "name": "COSMOS 2251",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S22675:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "24946": {
+      "name": "IRIDIUM 33",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S24946:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "25417": {
+      "name": "ORBCOMM FM16",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S25417:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "25730": {
+      "name": "FENGYUN 1C",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S25730:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "25736": {
+      "name": "MUBLCOM",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S25736:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "25984": {
+      "name": "ORBCOMM FM36",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S25984:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "26207": {
+      "name": "CZ-4B DEB",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S26207:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "30670": {
+      "name": "FENGYUN 1C DEB",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S30670:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "35871": {
+      "name": "BLITS",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S35871:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "37756": {
+      "name": "FREGAT DEB (TANK)",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S37756:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "38746": {
+      "name": "BREEZE-M R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S38746:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "44547": {
+      "name": "YUNHAI-1 02",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S44547:O"
+        ]
+      ],
+      "in_v2": false
+    },
+    "48078": {
+      "name": "SL-16 DEB",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "gone",
+          "C",
+          "S48078:C"
+        ]
+      ],
+      "in_v2": true
+    },
+    "69537": {
+      "name": "ZHUQUE-2E R/B",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "inorbit",
+          "O",
+          "S69537:O"
+        ]
+      ],
+      "in_v2": false
+    }
+  },
+  "v2_only_examples": {
+    "19671": {
+      "name": "USA 34",
+      "ct_decay": "",
+      "ct_orbit_type": "ORB",
+      "history": [
+        [
+          "gone",
+          "D",
+          "S19671:D"
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,81 @@
+```python
+def verify_disposition_disagreement():
+    """Independent cross-check of DispositionDisagreement metric.
+    
+    Completely separate implementation to validate python_side() result.
+    Uses different constants, logic flow, and variable names.
+    """
+    celestrak_db = load_celestrak()
+    gcat_db, _, _ = load_gcat("gcat_satcat.tsv")
+    
+    # Separately defined status codes (independent copy)
+    disposed_codes = {
+        "R", "D", "L", "LF", "S", "F", "AF", "AS", "AR",
+        "AR IN", "AL", "AL IN", "TX"
+    }
+    escaped_codes = {
+        "DSO", "DSA", "DSA IN", "EO", "EAO", "EN", "OI", "OE", "LO", "LOA"
+    }
+    
+    disagreement_count = 0
+    
+    for catalog_id in gcat_db:
+        if catalog_id not in celestrak_db:
+            continue
+        
+        # Gather statuses from all phases
+        phases = gcat_db[catalog_id]
+        all_statuses = {p.get("Status", "").strip() for p in phases}
+        
+        # Check disposition indicators
+        gcat_disposed = any(s in disposed_codes for s in all_statuses)
+        gcat_escaped = any(s in escaped_codes for s in all_statuses)
+        
+        # Check CelesTrak decay indicator
+        decay_date = celestrak_db[catalog_id]["DECAY_DATE"].strip()
+        ct_disposed = bool(decay_date)
+        
+        # Primary disagreement check
+        primary_mismatch = gcat_disposed != ct_disposed
+        
+        # Exception case: object in CelesTrak but only escaped, not disposed
+        exception_case = ct_disposed and gcat_escaped and not gcat_disposed
+        
+        if primary_mismatch and not exception_case:
+            disagreement_count += 1
+    
+    return disagreement_count
+
+
+# In python_side() function, add verification:
+def python_side():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    aux, _, _ = load_gcat("gcat_auxcat.tsv")
+    fto, _, _ = load_gcat("gcat_ftocat.tsv")
+    allg = set(sat) | set(aux) | set(fto)
+    st = {n: {p.get("Status", "").strip() for p in v} for n, v in sat.items()}
+    ctdec = {n for n in ct if ct[n]["DECAY_DATE"].strip()}
+    phantom = {n for n in sat if (st[n] & ERROR) and n in ct}
+    
+    disposition_disagreement = len({
+        n for n in sat if n in ct
+        and (bool(st[n] & GONE) != (n in ctdec))
+        and not ((n in ctdec) and (st[n] & LEFT_EARTH) and not (st[n] & GONE))})
+    
+    # Verify with independent computation
+    disposition_disagreement_verified = verify_disposition_disagreement()
+    if disposition_disagreement != disposition_disagreement_verified:
+        print(f"ERROR: DispositionDisagreement mismatch - {disposition_disagreement} vs {disposition_disagreement_verified}", file=sys.stderr)
+        sys.exit(1)
+    
+    return {
+        "PhantomEntry": len(phantom),
+        "PhantomEntryOnOrbit": len({n for n in phantom if n not in ctdec}),
+        "UndisclosedTrackingLoss": len({n for n in sat if (st[n] & LOST) and n in ct and n not in ctdec}),
+        "DispositionDisagreement": disposition_disagreement,
+        "CoverageGap": len(set(ct) - allg),
+        "UnnumberedObject": len(nona),
+        "IdentifierCollision": len({n for n in sat if len({p.get("JCAT","")[:6] for p in sat[n]}) > 1}),
+    }
+```

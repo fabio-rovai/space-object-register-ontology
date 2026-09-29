@@ -1,0 +1,29 @@
+from reconcile import load_celestrak, load_gcat, statuses, GONE, INORBIT, LEFT_EARTH, ERROR, LOST
+
+
+def python_side_independent():
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    disagreement = 0
+    for n in ct:
+        if n not in sat:
+            continue
+        s = statuses(sat[n])
+        decayed = ct[n]["DECAY_DATE"].strip() != ""
+        marked_gone = len(s & GONE) > 0
+        marked_inorbit = len(s & INORBIT) > 0
+        if marked_gone and not decayed:
+            disagreement += 1
+        elif marked_inorbit and decayed:
+            disagreement += 1
+    return {"DispositionDisagreement": disagreement}
+
+
+def cross_check():
+    a = python_side()["DispositionDisagreement"]
+    b = python_side_independent()["DispositionDisagreement"]
+    if a != b:
+        raise AssertionError(
+            f"DispositionDisagreement mismatch: python_side={a} python_side_independent={b}"
+        )
+    return a

@@ -1,0 +1,189 @@
+# pipeline/verify_disposition.py
+"""Independent second path for the DispositionDisagreement count.
+
+This module does not import or reuse any code or constants from reconcile.py
+or governance_report.py. The status classification below comes directly from
+the GCAT 'Phases and Status Values' page (release 1.8.8, retrieved 2026-09-29),
+grouped by the page's own section headings. It is not copied from the
+existing sets.
+
+Metric definition, restated from first principles:
+  Scope: objects that have at least one phase in the GCAT main satcat and also
+  appear in CelesTrak SATCAT.
+  GCAT says "ended at a surface or destroyed" if any phase status falls in
+  the terminal-at-C sections.
+  CelesTrak says "decayed" if DECAY_DATE is non-blank.
+  The two catalogues disagree when those two booleans differ.
+  Excluded: CelesTrak says decayed, GCAT has no terminal-at-C status, and
+  GCAT shows the object left Earth's sphere of influence (the deep-space or
+  body-name sections).
+
+Deliberate hardening relative to a naive implementation:
+  NORAD IDs from both sources are normalised to canonical integers, so a
+  leading zero cannot silently break the join.
+  GCAT rows with fewer fields than the header are padded, not dropped, and
+  the number of padded rows is reported.
+  Internal whitespace in multi-word status codes is collapsed.
+"""
+import csv
+import sys
+import pathlib
+import argparse
+
+_HERE = pathlib.Path(__file__).resolve().parent
+_DATA_DIR = _HERE.parent / "data"
+
+_SPEC_SECTIONS = {
+    "no_t2_no_dest": ["O", "AO", "AO IN", "UDK", "REL", "DEP", "TO", "TOA", "OX"],
+    "dest_blank_t2_set": ["E", "N", "NA", "LEASE"],
+    "dest_on_C": ["S", "R", "D", "L", "LF", "AS", "AR", "AR IN", "AL", "AL IN",
+                  "TX", "F", "AF"],
+    "dest_deep_space_catalog": ["DSO", "DSA", "DSA IN", "LO", "LOA"],
+    "dest_main_catalog": ["DK", "GRP", "ATT", "TFR", "TFR E", "TFR IN", "C",
+                          "EVA DP", "EVA RP", "REFLT"],
+    "dest_body_name": ["EO", "EAO", "EN", "OI", "OE"],
+    "special": ["ERR"],
+}
+
+_TERMINAL_AT_C = frozenset(_SPEC_SECTIONS["dest_on_C"])
+_DEPARTED_EARTH = frozenset(_SPEC_SECTIONS["dest_deep_space_catalog"]
+                            + _SPEC_SECTIONS["dest_body_name"])
+_KNOWN_CODES = frozenset(c for codes in _SPEC_SECTIONS.values() for c in codes)
+
+
+def _canon_norad(raw):
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s or not s.isdigit():
+        return None
+    return int(s)
+
+
+def _canon_status(raw):
+    return " ".join((raw or "").split()).upper()
+
+
+def _read_celestrak(path):
+    decayed_by_id = {}
+    dupes = 0
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        i_id = header.index("NORAD_CAT_ID")
+        i_decay = header.index("DECAY_DATE")
+        for row in reader:
+            if not row or len(row) <= max(i_id, i_decay):
+                continue
+            nid = _canon_norad(row[i_id])
+            if nid is None:
+                continue
+            if nid in decayed_by_id:
+                dupes += 1
+            decayed_by_id[nid] = bool(row[i_decay].strip())
+    return decayed_by_id, dupes
+
+
+def _read_gcat_statuses(path):
+    status_sets = {}
+    padded = 0
+    unknown = set()
+    with open(path, encoding="utf-8-sig", errors="replace") as fh:
+        header = None
+        for line in fh:
+            line = line.rstrip("\r\n")
+            if header is None:
+                if line.startswith("#"):
+                    header = [h.strip() for h in line[1:].split("\t")]
+                    i_sat = header.index("Satcat")
+                    i_status = header.index("Status")
+                continue
+            if not line.strip() or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < len(header):
+                padded += 1
+                fields += [""] * (len(header) - len(fields))
+            nid = _canon_norad(fields[i_sat])
+            if nid is None:
+                continue
+            code = _canon_status(fields[i_status])
+            if code and code not in _KNOWN_CODES:
+                unknown.add(code)
+            status_sets.setdefault(nid, set()).add(code)
+    if header is None:
+        raise RuntimeError(f"no '#'-prefixed header found in {path}")
+    return status_sets, padded, unknown
+
+
+def independent_disposition_disagreement(data_dir=_DATA_DIR, diagnostics=None):
+    ct_decayed, ct_dupes = _read_celestrak(data_dir / "celestrak_satcat.csv")
+    gcat, padded, unknown = _read_gcat_statuses(data_dir / "gcat_satcat.tsv")
+
+    count = 0
+    members = []
+    for nid, codes in gcat.items():
+        if nid not in ct_decayed:
+            continue
+        gcat_gone = not codes.isdisjoint(_TERMINAL_AT_C)
+        ct_gone = ct_decayed[nid]
+        if gcat_gone == ct_gone:
+            continue
+        if ct_gone and not gcat_gone and not codes.isdisjoint(_DEPARTED_EARTH):
+            continue
+        count += 1
+        members.append(nid)
+
+    if diagnostics is not None:
+        diagnostics.update({
+            "celestrak_duplicate_ids": ct_dupes,
+            "gcat_padded_short_rows": padded,
+            "gcat_unrecognised_status_codes": sorted(unknown),
+            "members": sorted(members),
+        })
+    return count
+
+
+def _existing_value():
+    # Imported lazily and only for comparison. The independent computation
+    # above never touches this.
+    sys.path.insert(0, str(_HERE))
+    import governance_report
+    return governance_report.python_side()["DispositionDisagreement"]
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--expected", type=int, default=None,
+                    help="compare against this value instead of running the existing path")
+    ap.add_argument("--no-compare", action="store_true")
+    ap.add_argument("--dump-members", type=pathlib.Path, default=None)
+    args = ap.parse_args(argv)
+
+    diag = {}
+    mine = independent_disposition_disagreement(diagnostics=diag)
+    print(f"independent DispositionDisagreement = {mine}")
+    print(f"  celestrak duplicate ids      : {diag['celestrak_duplicate_ids']}")
+    print(f"  gcat short rows padded       : {diag['gcat_padded_short_rows']}")
+    print(f"  gcat unrecognised statuses   : {diag['gcat_unrecognised_status_codes'] or 'none'}")
+    if args.dump_members:
+        args.dump_members.write_text("\n".join(str(n) for n in diag["members"]) + "\n")
+
+    if diag["gcat_unrecognised_status_codes"]:
+        print("WARN: GCAT contains status codes not in the documented spec; "
+              "classification may be incomplete", file=sys.stderr)
+
+    if args.no_compare:
+        return 0
+    theirs = args.expected if args.expected is not None else _existing_value()
+    print(f"existing   DispositionDisagreement = {theirs}")
+    if mine != theirs:
+        print(f"MISMATCH: independent={mine} existing={theirs} delta={mine - theirs}",
+              file=sys.stderr)
+        return 1
+    print("OK: both paths agree")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

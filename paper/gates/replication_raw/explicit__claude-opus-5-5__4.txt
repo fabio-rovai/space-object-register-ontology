@@ -1,0 +1,142 @@
+"""Independent second computation of DispositionDisagreement.
+
+This module deliberately imports nothing from reconcile.py or
+governance_report.py. File parsing, identifier normalisation, status
+vocabulary and the disagreement rule are all re-implemented here so that
+a defect in the primary path cannot silently reproduce itself in this one.
+
+The GCAT status vocabulary below was transcribed separately from
+planet4589.org/space/gcat/web/intro/phases.html. It should be re-verified
+against that page whenever GCAT revises its phase codes. If both paths
+transcribe the same code wrongly, they will agree and the cross-check
+will not catch it.
+"""
+import csv
+import pathlib
+import re
+import sys
+
+_BASE = pathlib.Path(__file__).resolve().parent.parent / "data"
+
+_TERMINATED_CODES = frozenset({
+    "R", "D", "L", "LF", "S", "F",
+    "AF", "AS", "AR", "AR IN", "AL", "AL IN",
+    "TX",
+})
+
+_HELIOCENTRIC_OR_BEYOND_CODES = frozenset({
+    "DSO", "DSA", "DSA IN",
+    "EO", "EAO", "EN",
+    "OI", "OE",
+    "LO", "LOA",
+})
+
+_NUMERIC_ID = re.compile(r"^\s*0*(\d+)\s*$")
+
+
+def _norm_id(raw):
+    if raw is None:
+        return None
+    m = _NUMERIC_ID.match(raw)
+    if not m:
+        return None
+    return m.group(1) or "0"
+
+
+def _norm_status(raw):
+    if raw is None:
+        return ""
+    return " ".join(raw.split()).upper()
+
+
+def _celestrak_decayed_and_known(path):
+    known, decayed = set(), set()
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip().upper() for h in next(reader)]
+        try:
+            id_col = header.index("NORAD_CAT_ID")
+            dec_col = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise SystemExit(f"verify: CelesTrak header missing column: {exc}")
+        for row in reader:
+            if len(row) <= max(id_col, dec_col):
+                continue
+            nid = _norm_id(row[id_col])
+            if nid is None:
+                continue
+            known.add(nid)
+            if row[dec_col].strip():
+                decayed.add(nid)
+    return known, decayed
+
+
+def _gcat_status_sets(path):
+    result = {}
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        header_line = fh.readline()
+        cols = [c.strip() for c in header_line.lstrip("#").rstrip("\r\n").split("\t")]
+        try:
+            sat_col = cols.index("Satcat")
+            st_col = cols.index("Status")
+        except ValueError as exc:
+            raise SystemExit(f"verify: GCAT header missing column: {exc}")
+        ncols = len(cols)
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\r\n").split("\t")
+            if len(fields) < ncols:
+                continue
+            nid = _norm_id(fields[sat_col])
+            if nid is None:
+                continue
+            result.setdefault(nid, set()).add(_norm_status(fields[st_col]))
+    return result
+
+
+def disposition_disagreement_independent(data_dir=_BASE):
+    data_dir = pathlib.Path(data_dir)
+    ct_known, ct_decayed = _celestrak_decayed_and_known(data_dir / "celestrak_satcat.csv")
+    gcat = _gcat_status_sets(data_dir / "gcat_satcat.tsv")
+
+    gcat_says_gone_ct_says_up = set()
+    ct_says_gone_gcat_says_up = set()
+
+    for nid, codes in gcat.items():
+        if nid not in ct_known:
+            continue
+        terminated = not codes.isdisjoint(_TERMINATED_CODES)
+        departed = not codes.isdisjoint(_HELIOCENTRIC_OR_BEYOND_CODES)
+        decayed = nid in ct_decayed
+
+        if terminated and not decayed:
+            gcat_says_gone_ct_says_up.add(nid)
+        elif decayed and not terminated and not departed:
+            ct_says_gone_gcat_says_up.add(nid)
+
+    return {
+        "total": len(gcat_says_gone_ct_says_up) + len(ct_says_gone_gcat_says_up),
+        "gcat_terminated_celestrak_active": len(gcat_says_gone_ct_says_up),
+        "celestrak_decayed_gcat_active": len(ct_says_gone_gcat_says_up),
+    }
+
+
+def main():
+    independent = disposition_disagreement_independent()
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from governance_report import python_side
+    primary = python_side()["DispositionDisagreement"]
+    ok = primary == independent["total"]
+    print(
+        f"DispositionDisagreement primary={primary} "
+        f"independent={independent['total']} "
+        f"(gcat_terminated_celestrak_active={independent['gcat_terminated_celestrak_active']}, "
+        f"celestrak_decayed_gcat_active={independent['celestrak_decayed_gcat_active']}) "
+        f"{'OK' if ok else 'MISMATCH'}"
+    )
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

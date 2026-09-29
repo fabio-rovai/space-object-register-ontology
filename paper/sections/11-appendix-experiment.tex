@@ -1,0 +1,65 @@
+\section{Generation experiment: protocol and per-trial results}
+\label{app:experiment}
+
+\paragraph{Behavioural probe.}
+\texttt{behaviour\_probe.py} writes a synthetic CelesTrak file and GCAT file
+under the paths the prompt names. There are 14 cells: each of \texttt{E},
+\texttt{C}, \texttt{DK}, \texttt{ATT}, \texttt{TFR} and \texttt{GRP}, paired
+with a CelesTrak decay date and without one, plus two controls every reading
+counts (\texttt{R} with no decay date, \texttt{O} with one). Cell $i$ holds $2^i$
+objects, all with five-digit catalogue numbers so zero-padded and bare forms
+coincide. The generated code runs in a separate process with the prompt's module
+importable and its names preloaded, since many paths use them without importing
+them; the original path is stubbed to return a sentinel that decodes to nothing.
+Every zero-argument function the code defines, other than loaders and helpers,
+is called, and any returned or printed count that decodes to a set containing
+both controls is taken as the path's signature. The same code is then run on the
+frozen real files and the number each chosen function returns is recorded.
+Reference signatures are obtained by running the reference code through the
+same harness, not written down; the verbatim pre-correction path returns 932 on
+the real files, which checks the harness end to end.
+
+\paragraph{Preliminary run (19 August).}
+Prompt in \texttt{reuse\_experiment.py}; raw outputs in \texttt{reuse\_raw/};
+labels in \texttt{behaviour\_labels.json}. The path shown counts only the two
+controls on the probe and returns 208 on the real files. Neutral request: 9 of 10
+reproduce 208; 1 does not run (it imports a name the module does not define).
+``Independent'': 10 of 10 reproduce 208. Sharing forbidden: 3 reproduce 208; 4
+read GCAT's catalogue-number column under a guessed name and return 0; 1 parses
+the files differently and returns 189; 1 crashes on real rows; 1 ignores the
+status codes, treats any GCAT phase end date as a decay, and returns 795. The
+earlier regex labels called all 30 ``inherits the defect''; that label
+described the vocabulary each path contains, not what it computes.
+
+\paragraph{Replication (29 September).}
+Runner \texttt{reuse\_replication.py}; prompts, raw outputs and per-trial
+metadata in \texttt{replication\_raw/}. Every model was called through the
+Claude Code CLI with \texttt{--tools ""},
+\texttt{--system-prompt "You are a helpful assistant."},
+\texttt{--setting-sources ""}, \texttt{--strict-mcp-config} and no session
+persistence, from an empty directory. Sonnet and Haiku ran on CLI version
+2.1.277; \texttt{claude-opus-5-5} needs 2.1.280 or later and ran on 2.1.284. The
+CLI does not expose sampling parameters, and its defaults include extended
+thinking, which every trial used. It also makes a small fixed auxiliary call to a
+Haiku model; the recorded per-model token usage shows that in every trial the
+answer's output tokens came from the requested model, in a single turn with no
+tool use. A local model from a second family was started and abandoned because
+it decoded too slowly to complete the design; no partial result is reported.
+
+\paragraph{Per-trial outcomes.}
+On the probe, 72 of the 75 paths have exactly the signature of the path shown,
+which counts all six codes as in orbit whenever CelesTrak records a decay. The
+three exceptions: one \texttt{claude-sonnet-5} path (sharing forbidden) returns 0
+on probe and real files because its hand-written CSV parser fails; one
+\texttt{claude-sonnet-5} path (sharing forbidden, with definitions) takes its
+decay signal from CelesTrak's operational status field, which the probe leaves
+blank, and returns 932 on the real files; one \texttt{claude-opus-5-5} path
+(sharing forbidden) raises on every status it has not classified, which on the
+real files includes \texttt{ATT}, \texttt{C}, \texttt{DK}, \texttt{E},
+\texttt{EVA DP} and \texttt{GRP}. A second Opus path (sharing forbidden, with
+definitions) matches the shown path on the probe and on the real files stops on
+the undocumented \texttt{L?} and \texttt{R?}. Three \texttt{claude-haiku-4-5}
+paths and several Opus paths reference a constant of the prompt's module without
+importing it or run as command-line programs; the harness supplies the constant
+and a data-directory argument, as the pipeline would, and reads counts that are
+printed rather than returned.

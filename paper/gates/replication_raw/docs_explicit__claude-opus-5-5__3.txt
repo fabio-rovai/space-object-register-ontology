@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Independent recomputation of DispositionDisagreement.
+
+Deliberately shares no code or constants with pipeline/reconcile.py or
+pipeline/governance_report.py. It uses its own file readers, its own
+identifier normalisation, and its own status taxonomy. The taxonomy is
+transcribed directly from GCAT 'Phases and Status Values'
+(planet4589.org/space/gcat/web/intro/phases.html, GCAT 1.8.8).
+
+Definition recomputed:
+    For every object numbered in gcat_satcat.tsv that also appears in the
+    CelesTrak SATCAT, let
+        g = some phase of the object ends with the object down, meaning
+            destroyed, landed, crashed or on a surface
+        c = CelesTrak gives a non-empty DECAY_DATE
+    The object is counted if g != c, unless c is true and some phase shows
+    the object leaving Earth's sphere of influence while no phase shows it down.
+
+Usage:
+    python pipeline/verify_disposition.py [--data DIR] [--expect N] [--json]
+Exit codes: 0 = computed (and matches --expect if given),
+            1 = mismatch with --expect, 2 = input problem.
+"""
+import argparse
+import csv
+import json
+import pathlib
+import sys
+
+_HERE = pathlib.Path(__file__).resolve().parent
+_DEFAULT_DATA = _HERE.parent / "data"
+
+# Terminal-down outcomes. Status describes the object at the end of the phase.
+# "Dest is a location on C, or C itself, or blank":
+_ENDED_DOWN = frozenset([
+    "S",       # targeted suborbital entry/impact, destroyed at t2
+    "R",       # reentered, destroyed in C's atmosphere after natural decay
+    "D",       # deorbited, destroyed in C's atmosphere via active deorbit
+    "L",       # landed or splashed down on C's surface
+    "LF",      # failed landing, destroyed on/after impact
+    "AS",      # suborbital reentered attached
+    "AR",      # reentered attached
+    "AR IN",   # reentered inside
+    "AL",      # landed attached
+    "AL IN",   # landed inside
+    "TX",      # transmission ended, operated on C's surface
+    "F",       # failed, crashed/destroyed during launch failure
+    "AF",      # failed attached, crashed/destroyed during launch failure
+])
+
+# Departures from the central body's sphere of influence or orbit.
+# "Dest is a JCAT from D catalog" and "Dest is a body name":
+_DEPARTED = frozenset([
+    "DSO", "DSA", "DSA IN",   # passed deep space boundary
+    "LO", "LOA",              # liftoff from non-Earth world, catalog reassigned
+    "EO", "EAO", "EN",        # escape / encounter, entered another SOI
+    "OI",                     # orbit insertion around another body
+    "OE",                     # orbit escape
+])
+
+
+def _norm_id(raw):
+    """Canonical NORAD number as a decimal string without leading zeros, or None."""
+    if raw is None:
+        return None
+    t = raw.strip()
+    if not t or not t.isascii() or not t.isdigit():
+        return None
+    return str(int(t))
+
+
+def read_celestrak_decay(path):
+    """Map normalised NORAD id to True if CelesTrak lists a decay date."""
+    decayed = {}
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip().upper() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_dec = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise SystemExit(f"[verify] CelesTrak header missing column: {exc}") from None
+        width = max(i_id, i_dec) + 1
+        for row in reader:
+            if len(row) < width:
+                continue
+            key = _norm_id(row[i_id])
+            if key is None:
+                continue
+            decayed[key] = bool(row[i_dec].strip())
+    return decayed
+
+
+def read_gcat_status_sets(path):
+    """Map normalised Satcat number to the set of phase Status values.
+
+    Returns (status_sets, short_rows) where short_rows counts data lines with
+    fewer fields than the header. Those lines are excluded so that they are
+    treated the same way as the primary path, and they are reported rather than
+    silently dropped.
+    """
+    status_sets = {}
+    short_rows = 0
+    with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+        header = None
+        for raw in fh:
+            line = raw.rstrip("\r\n")
+            if header is None:
+                header = [h.strip() for h in line.lstrip("#").split("\t")]
+                try:
+                    i_sat = header.index("Satcat")
+                    i_st = header.index("Status")
+                except ValueError as exc:
+                    raise SystemExit(f"[verify] GCAT header missing column: {exc}") from None
+                continue
+            if line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < len(header):
+                short_rows += 1
+                continue
+            key = _norm_id(fields[i_sat])
+            if key is None:
+                continue
+            status_sets.setdefault(key, set()).add(" ".join(fields[i_st].split()))
+    if header is None:
+        raise SystemExit(f"[verify] empty GCAT file: {path}")
+    return status_sets, short_rows
+
+
+def disposition_disagreements(status_sets, decayed):
+    hits = []
+    for key, sts in status_sets.items():
+        if key not in decayed:
+            continue
+        g_down = not sts.isdisjoint(_ENDED_DOWN)
+        c_down = decayed[key]
+        if g_down == c_down:
+            continue
+        if c_down and not g_down and not sts.isdisjoint(_DEPARTED):
+            continue
+        hits.append(key)
+    hits.sort(key=int)
+    return hits
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Independent DispositionDisagreement recomputation")
+    ap.add_argument("--data", type=pathlib.Path, default=_DEFAULT_DATA)
+    ap.add_argument("--expect", type=int, default=None,
+                    help="count from the primary path; exit 1 if different")
+    ap.add_argument("--json", action="store_true", help="emit JSON including object ids")
+    args = ap.parse_args(argv)
+
+    ct_path = args.data / "celestrak_satcat.csv"
+    gc_path = args.data / "gcat_satcat.tsv"
+    for p in (ct_path, gc_path):
+        if not p.is_file():
+            print(f"[verify] missing input: {p}", file=sys.stderr)
+            return 2
+
+    decayed = read_celestrak_decay(ct_path)
+    status_sets, short_rows = read_gcat_status_sets(gc_path)
+    hits = disposition_disagreements(status_sets, decayed)
+
+    unknown = sorted({s for sts in status_sets.values() for s in sts}
+                     - _ENDED_DOWN - _DEPARTED
+                     - {"O", "AO", "AO IN", "OX", "UDK", "REL", "DEP", "TO", "TOA",
+                        "E", "N", "NA", "LEASE", "DK", "GRP", "ATT", "TFR", "TFR E",
+                        "TFR IN", "C", "EVA DP", "EVA RP", "REFLT", "ERR", ""})
+
+    result = {
+        "DispositionDisagreement": len(hits),
+        "gcat_short_rows_excluded": short_rows,
+        "undocumented_status_values": unknown,
+    }
+    if args.json:
+        result["objects"] = hits
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"DispositionDisagreement (independent): {len(hits)}")
+        if short_rows:
+            print(f"[verify] warning: {short_rows} GCAT rows shorter than header were excluded",
+                  file=sys.stderr)
+        if unknown:
+            print(f"[verify] warning: status values not in GCAT 1.8.8 documentation: {unknown}",
+                  file=sys.stderr)
+
+    if args.expect is not None and args.expect != len(hits):
+        print(f"[verify] MISMATCH: primary={args.expect} independent={len(hits)}",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

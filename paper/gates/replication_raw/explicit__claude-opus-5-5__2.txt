@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Independent verification path for the DispositionDisagreement count.
+
+This module deliberately imports nothing from reconcile.py or governance_report.py.
+It re-parses the source files with a different parser, normalises identifiers on
+both sides, classifies GCAT status codes through a separately maintained
+vocabulary, and evaluates the rule through an explicit truth table instead of a
+boolean expression.
+
+Status vocabulary
+-----------------
+The table below was transcribed independently from the GCAT phase documentation
+(planet4589.org/space/gcat/web/intro/phases.html), not copied from reconcile.py.
+It must be reviewed against that page, not against the other implementation.
+Otherwise a shared transcription error would pass both paths.
+
+To override the table, place a JSON mapping {code: class} at
+data/verification/gcat_status_classes.json. Valid classes are "gone", "orbit",
+"left_earth", "error" and "other".
+
+Any status code that appears in the data but is not classified causes a hard
+failure. It is never silently treated as "not gone".
+
+Rule being verified
+-------------------
+For each object present in both GCAT satcat and CelesTrak SATCAT:
+    G = GCAT has at least one phase whose status is in the "gone" class
+    C = CelesTrak DECAY_DATE is non-empty
+    L = GCAT has at least one phase whose status is in the "left_earth" class
+The object is a disagreement unless the (G, C, L) combination is marked as
+consistent in DISPOSITION_TABLE.
+
+Exit codes
+----------
+0  counts match, or no expected value was supplied
+1  counts differ
+2  unclassified status codes were found, or the input is malformed
+"""
+import argparse
+import csv
+import json
+import pathlib
+import sys
+from itertools import product
+
+_HERE = pathlib.Path(__file__).resolve().parent
+_DATA_DIR = _HERE.parent / "data"
+_VOCAB_OVERRIDE = _DATA_DIR / "verification" / "gcat_status_classes.json"
+
+_BASE_CLASSES = {
+    "R": "gone", "D": "gone", "L": "gone", "LF": "gone",
+    "S": "gone", "F": "gone", "TX": "gone",
+    "O": "orbit", "OX": "orbit",
+    "DSO": "left_earth", "DSA": "left_earth", "EO": "left_earth",
+    "EAO": "left_earth", "EN": "left_earth", "OI": "left_earth",
+    "OE": "left_earth", "LO": "left_earth", "LOA": "left_earth",
+    "ERR": "error",
+}
+
+_VALID_CLASSES = {"gone", "orbit", "left_earth", "error", "other"}
+
+# Key: (gcat_gone, celestrak_decayed, gcat_left_earth)
+# Value: True means the two catalogues are consistent for this object.
+DISPOSITION_TABLE = {
+    (False, False, False): True,
+    (False, False, True): True,
+    (True, True, False): True,
+    (True, True, True): True,
+    (True, False, False): False,
+    (True, False, True): False,
+    (False, True, False): False,
+    (False, True, True): True,
+}
+assert set(DISPOSITION_TABLE) == set(product((False, True), repeat=3))
+
+
+class UnclassifiedStatus(Exception):
+    pass
+
+
+def _load_vocabulary():
+    if _VOCAB_OVERRIDE.exists():
+        table = json.loads(_VOCAB_OVERRIDE.read_text(encoding="utf-8"))
+        bad = {k: v for k, v in table.items() if v not in _VALID_CLASSES}
+        if bad:
+            raise ValueError(f"invalid classes in {_VOCAB_OVERRIDE}: {bad}")
+        return {" ".join(k.split()): v for k, v in table.items()}, str(_VOCAB_OVERRIDE)
+    return dict(_BASE_CLASSES), "embedded"
+
+
+def _classify(code, vocab):
+    """Resolve a status code to a class.
+
+    Resolution order:
+      1. exact match in the vocabulary
+      2. strip a trailing ' IN' qualifier and retry
+      3. strip a leading 'A' (attached-object) prefix and retry
+    Returns None when the code cannot be resolved.
+    """
+    norm = " ".join(code.split())
+    if norm in vocab:
+        return vocab[norm]
+    if norm.endswith(" IN"):
+        return _classify(norm[:-3], vocab)
+    if len(norm) > 1 and norm[0] == "A" and norm[1:] in vocab:
+        return vocab[norm[1:]]
+    return None
+
+
+def _norad_key(raw):
+    s = (raw or "").strip()
+    if not s or not s.isascii() or not s.isdigit():
+        return None
+    return int(s)
+
+
+def _read_celestrak(path):
+    decayed = {}
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = [h.strip() for h in next(reader)]
+        try:
+            i_id = header.index("NORAD_CAT_ID")
+            i_decay = header.index("DECAY_DATE")
+        except ValueError as exc:
+            raise ValueError(f"{path}: missing expected column ({exc})") from None
+        for row in reader:
+            if len(row) <= max(i_id, i_decay):
+                continue
+            key = _norad_key(row[i_id])
+            if key is None:
+                continue
+            decayed[key] = bool(row[i_decay].strip())
+    return decayed
+
+
+def _read_gcat_statuses(path):
+    """Return ({norad: [status, ...]}, number_of_short_rows_skipped)."""
+    csv.field_size_limit(sys.maxsize if sys.maxsize < 2**63 else 2**31 - 1)
+    per_object = {}
+    skipped = 0
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE)
+        header = None
+        for row in reader:
+            if header is None:
+                if not row:
+                    continue
+                first = row[0]
+                if first.startswith("#"):
+                    first = first[1:]
+                header = [first.strip()] + [c.strip() for c in row[1:]]
+                i_sat = header.index("Satcat")
+                i_status = header.index("Status")
+                width = len(header)
+                continue
+            if row and row[0].startswith("#"):
+                continue
+            if len(row) < width:
+                skipped += 1
+                continue
+            key = _norad_key(row[i_sat])
+            if key is None:
+                continue
+            per_object.setdefault(key, []).append(row[i_status].strip())
+    if header is None:
+        raise ValueError(f"{path}: no header row found")
+    return per_object, skipped
+
+
+def compute_disposition_disagreement(data_dir=_DATA_DIR):
+    vocab, vocab_source = _load_vocabulary()
+    celestrak = _read_celestrak(pathlib.Path(data_dir) / "celestrak_satcat.csv")
+    gcat, skipped = _read_gcat_statuses(pathlib.Path(data_dir) / "gcat_satcat.tsv")
+
+    unclassified = {}
+    disagreements = []
+    cell_counts = {k: 0 for k in DISPOSITION_TABLE}
+
+    for norad in sorted(gcat.keys() & celestrak.keys()):
+        classes = set()
+        for code in gcat[norad]:
+            if code == "":
+                continue
+            cls = _classify(code, vocab)
+            if cls is None:
+                unclassified.setdefault(code, []).append(norad)
+            else:
+                classes.add(cls)
+        cell = ("gone" in classes, celestrak[norad], "left_earth" in classes)
+        cell_counts[cell] += 1
+        if not DISPOSITION_TABLE[cell]:
+            disagreements.append(norad)
+
+    if unclassified:
+        detail = {k: len(v) for k, v in sorted(unclassified.items())}
+        raise UnclassifiedStatus(f"unclassified GCAT status codes: {detail}")
+
+    return {
+        "count": len(disagreements),
+        "norad_ids": disagreements,
+        "cell_counts": {"G=%d C=%d L=%d" % tuple(map(int, k)): v
+                        for k, v in cell_counts.items()},
+        "gcat_rows_skipped_short": skipped,
+        "vocabulary_source": vocab_source,
+        "objects_compared": len(gcat.keys() & celestrak.keys()),
+    }
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--data-dir", default=str(_DATA_DIR))
+    ap.add_argument("--expected", type=int, default=None,
+                    help="count from the primary path; exits 1 on mismatch")
+    ap.add_argument("--expected-ids", default=None,
+                    help="optional JSON file listing NORAD ids from the primary path, for set diff")
+    ap.add_argument("--json", action="store_true", help="emit full result as JSON")
+    args = ap.parse_args(argv)
+
+    try:
+        result = compute_disposition_disagreement(args.data_dir)
+    except (UnclassifiedStatus, ValueError) as exc:
+        print(f"VERIFY-ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    report = {k: v for k, v in result.items() if k != "norad_ids"}
+    if args.expected_ids:
+        primary = {int(x) for x in json.loads(pathlib.Path(args.expected_ids).read_text())}
+        mine = set(result["norad_ids"])
+        report["only_in_primary"] = sorted(primary - mine)[:50]
+        report["only_in_independent"] = sorted(mine - primary)[:50]
+
+    if args.json:
+        print(json.dumps({**report, "norad_ids": result["norad_ids"]}, indent=2))
+    else:
+        print(json.dumps(report, indent=2))
+
+    if args.expected is not None and args.expected != result["count"]:
+        print(f"MISMATCH DispositionDisagreement: primary={args.expected} "
+              f"independent={result['count']}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

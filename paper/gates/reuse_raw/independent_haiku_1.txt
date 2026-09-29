@@ -1,0 +1,19 @@
+```python
+def verify_disposition_disagreement():
+    """Independent verification path for DispositionDisagreement count."""
+    ct = load_celestrak()
+    sat, _, nona = load_gcat("gcat_satcat.tsv")
+    st = {n: statuses(v) for n, v in sat.items()}
+    
+    count = 0
+    for norad in set(ct) & set(sat):
+        has_decay = bool(ct[norad]["DECAY_DATE"].strip())
+        gcat_status = st[norad]
+        is_gone = bool(gcat_status & GONE)
+        is_inorbit = bool(gcat_status & INORBIT)
+        
+        if (is_gone and not has_decay) or (is_inorbit and has_decay):
+            count += 1
+    
+    return count
+```

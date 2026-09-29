@@ -1,0 +1,39 @@
+import csv
+
+def _load_celestrak_decay(path="data/celestrak_satcat.csv"):
+    decayed = set()
+    seen = set()
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            norad = (row.get("NORAD_CAT_ID") or "").strip()
+            if not norad:
+                continue
+            seen.add(norad)
+            if (row.get("DECAY_DATE") or "").strip():
+                decayed.add(norad)
+    return seen, decayed
+
+def _load_gcat_decay(path="data/gcat_satcat.tsv"):
+    decayed = set()
+    seen = set()
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f, delimiter="\t"):
+            norad = (row.get("Satcat") or "").strip()
+            if not norad or norad == "-":
+                continue
+            seen.add(norad)
+            ddate = (row.get("DDate") or "").strip()
+            if ddate and ddate != "-":
+                decayed.add(norad)
+    return seen, decayed
+
+def verify_disposition_disagreement():
+    ct_ids, ct_decayed = _load_celestrak_decay()
+    gc_ids, gc_decayed = _load_gcat_decay()
+    common = ct_ids & gc_ids
+    mismatches = sum(1 for n in common if (n in gc_decayed) != (n in ct_decayed))
+    return {"DispositionDisagreement": mismatches}
+
+if __name__ == "__main__":
+    result = verify_disposition_disagreement()
+    print(result)
